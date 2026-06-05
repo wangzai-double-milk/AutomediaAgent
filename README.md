@@ -1,4 +1,4 @@
-# � 全模态社交媒体自动运营 Agent · AutoMedia
+# 🌐 全模态社交媒体自动运营 Agent · AutoMedia
 ### 首发：小红书 (Xiaohongshu) | 架构可扩展至 抖音 / B站 / 视频号 / 微博 / Twitter / Instagram
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-AutomediaAgent-blue?logo=github)](https://github.com/wangzai-double-milk/AutomediaAgent)
@@ -16,7 +16,7 @@
 
 > **别再为 ChatGPT Plus + Midjourney + Sora + Runway 同时掏钱了。**
 > 🚀 **All-in-One 极简接入** ——只需一把火山引擎 API Key，即刻解锁国产顶级模型全家桶：
-> - 🧠 **Doubao-pro-32k**：媲美 GPT-4o 的语言理解，**输入价仅 ¥0.8 / 百万 tokens**，比 GPT-4o 便宜 **30 倍+**
+> - 🧠 **Doubao-Seed-1.6**：媲美 GPT-4o 的语言推理，**输入价仅 ¥0.8 / 百万 tokens**，比 GPT-4o 便宜 **30 倍+**
 > - 👁️ **Doubao-Seed-2.0-pro 全模态**：原生看图+看视频，告别为单独的视觉模型再开一份订阅
 > - 🎨 **Seedream 4.5**：国产 SOTA 文生图，分分钟产出可商用首图，秒杀 MJ 月费 30 美刀
 > - 🎬 **Seedance 2.0**：原生视频生成 + 视频理解，同价位国内独一档
