@@ -1,0 +1,809 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "vlm_analyze_post",
+      "description": "调用全模态大模型（VLM），结合帖子的多张图片、标题和正文，进行全局维度的联合分析。可以用于拆解爆款的视觉排版、修图参数、文案钩子、用户情绪等，对比当前技能并输出可以沉淀的综合运营 SOP 经验。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要分析的图片 URL 或本地绝对路径列表（支持多图，建议传入帖子所有的配图）。"
+        },
+        "video_url": {
+          "type": "string",
+          "description": "需要分析的视频 URL（如果是视频帖子，传入该链接，全模态模型将解析视频内容）。"
+        },
+        "title": {
+            "type": "string",
+            "description": "帖子的标题内容"
+          },
+          "content": {
+            "type": "string",
+            "description": "帖子的正文内容"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "发送给 VLM 的分析指令。例如：'结合标题和文案，分析这组图的排版逻辑、打光和色调参数，以及文案是如何与首图配合吸引减脂人群的，总结出可复用的图文联合 SOP'。"
+          }
+        },
+        "required": [
+          "images",
+          "prompt"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "code_run",
+      "description": "Code executor. Prefer python. Multi-call OK, use script param. Reply code block is executed if no script arg; prefer for single call to avoid escaping. No hardcoding bulk data",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "[Mutually exclusive] NEVER use this param when use reply code block."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "python",
+              "powershell"
+            ],
+            "description": "Code type",
+            "default": "python"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "in seconds",
+            "default": 60
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory, defaults to cwd"
+          },
+          "inline_eval": {
+            "type": "boolean",
+            "description": "DO NOT USE except explicitly specified."
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_read",
+      "description": "Read file. Read before modify for latest context and line numbers",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative or absolute"
+          },
+          "start": {
+            "type": "integer",
+            "description": "Start line number (1-based)"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of lines to read",
+            "default": 200
+          },
+          "keyword": {
+            "type": "string",
+            "description": "[Optional] If provided, returns first match (case-insensitive) with context"
+          },
+          "show_linenos": {
+            "type": "boolean",
+            "description": "Show line numbers",
+            "default": true
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_patch",
+      "description": "Replace unique old_content with new_content. Exact match required (whitespace/indentation). On failure, file_read to recheck",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path"
+          },
+          "old_content": {
+            "type": "string",
+            "description": "Original text block to replace (must be unique)"
+          },
+          "new_content": {
+            "type": "string",
+            "description": "New content. Supports {{file:path:startLine:endLine}} to ref file lines, auto-expanded"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_write",
+      "description": "Create/overwrite/append files. HUGE edits ONLY. Supports {{file:path:startLine:endLine}}, auto-expanded",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "overwrite",
+              "append",
+              "prepend"
+            ],
+            "description": "Write mode",
+            "default": "overwrite"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_working_checkpoint",
+      "description": "Short-term working notepad, auto-injected each turn to prevent info loss in long tasks. Call during early/mid stages, not at end. When: (1) after reading SOP, store user needs & key constraints (skip for simple 1-2 step tasks); (2) before subtask switch or context flush; (3) after repeated failures, re-read SOP and must store new findings; (4) on new task, update content, clear old progress but keep valid constraints.\n\nDon't call: simple tasks (1-2 steps), task completed (use long-term memory tool)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key_info": {
+            "type": "string",
+            "description": "Replaces current notepad (<200 tokens). Incremental update: review existing, keep valid, add/remove/modify. Store: pitfalls, user requirements, key params/findings, file paths, progress, next steps. Don't store: ephemeral info, obvious context, old task info when user switched tasks. Prefer over-updating over losing key info"
+          },
+          "related_sop": {
+            "type": "string",
+            "description": "Related SOP names, tips for further re-read"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ask_user",
+      "description": "Interrupt task to ask user when needing decisions, extra info, or facing unresolvable blockers",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question for the user"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional quick-select choices for the user"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "start_long_term_update",
+      "description": "Start distilling long-term memory. Call when discovering info worth remembering (env facts/user prefs/lessons learned). Skip if memory already updated or in autonomous flow. Must call when a task that took 15+ turns is completed",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_scan",
+      "description": "Get simplified HTML and tab list. Removes hidden/floating/covered elements. Call after switching pages",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabs_only": {
+            "type": "boolean",
+            "description": "Show tab list only, no HTML"
+          },
+          "switch_tab_id": {
+            "type": "string",
+            "description": "[Optional] Tab ID to switch to"
+          },
+          "text_only": {
+            "type": "boolean",
+            "description": "Plain text only, no HTML"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_execute_js",
+      "description": "Execute JS. Multi-call OK with different switch_tab_id. No guessing. Act accurately to reduce web_scan calls. Execute JS in ```javascript blocks if no script arg, prefer to avoid escaping",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "[Mutually exclusive] JS code or script path. NEVER use this param when use reply code block"
+          },
+          "save_to_file": {
+            "type": "string",
+            "description": "file path; **only** for long result"
+          },
+          "no_monitor": {
+            "type": "boolean",
+            "description": "Skip page change monitoring, saves 2-3s. Only for reads, not for page actions"
+          },
+          "switch_tab_id": {
+            "type": "string",
+            "description": "[Optional] Tab ID to switch to before executing"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_task_init",
+      "description": "Create a debug workspace tasks/<ts>_<slug>/ for this xhs session, copy the user image into it, return task_dir. Subsequent intermediate artifacts (dish_info.json, viral_refs/, edited images, annotated.png) should be saved here for the user to inspect later. Archival only, NOT a strict-flow gate.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_request": {
+            "type": "string",
+            "description": "Raw user request (used for naming the workspace)"
+          },
+          "image": {
+            "type": "string",
+            "description": "[Optional] Local image path, auto-copied into workspace"
+          }
+        },
+        "required": [
+          "user_request"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_identify_dish",
+      "description": "Use Doubao VLM to identify the dish. Returns {dish_name, category, search_keywords, confidence}. Result auto-saved to task_dir/dish_info.json. Pass search_keywords[0] to xhs_search_viral.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "Local image path"
+          }
+        },
+        "required": [
+          "image"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_search_viral",
+      "description": "Navigate to Xiaohongshu search page + scrape top N note covers → download to task_dir/viral_refs/ → return {reference_images: [local paths]} for xhs_image_review.\nXiaohongshu's default sort is good enough; this tool does navigate + scrape + download in a single call.\nfetch_content (default 3): realClick top N cards into mask overlays to also grab body text + tags into viral_meta.json[covers[i].content] — required for caption writing.\nRequires CDP-bridged Chrome with xiaohongshu.com logged in.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword (optional when skip_navigate=true)"
+          },
+          "top_n": {
+            "type": "integer",
+            "description": "Cover count (default 10, recommend 8-15)",
+            "default": 10
+          },
+          "skip_navigate": {
+            "type": "boolean",
+            "description": "true=don't navigate, scrape current page (when already on target page)",
+            "default": false
+          },
+          "fetch_content": {
+            "type": "integer",
+            "description": "Scrape full body text + tags from top N notes (saved into viral_meta.json[covers[i].content]). Default 3 — required for caption writing. Pass 0 to explicitly skip",
+            "default": 3
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_review",
+      "description": "Xiaohongshu food cover strict-mode review (Doubao VLM). ⚠️ HARD REQUIREMENT: callers MUST first scrape viral covers from xiaohongshu/douyin and pass their local paths via reference_images — strict-mode scoring depends on viral comparison (viral_patterns/gaps_vs_viral/roast all rely on this). See skills/hard_skills/xhs_main/SKILL.md for full flow. Returns: score / verdict (PASS|REWORK|REPHOTO) / dimensions / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / roast / title_hints / summary",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "Local path or public URL of the image"
+          },
+          "hint": {
+            "type": "string",
+            "description": "[Optional] Dish hint, e.g. 'Japanese ramen, main subject is noodles + chashu'"
+          },
+          "reference_images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "STRONGLY RECOMMENDED 3-5 viral covers (paths/URLs). Without it only SOLO review runs — no viral_patterns/gaps_vs_viral/roast"
+          }
+        },
+        "required": [
+          "image"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_edit",
+      "description": "Doubao Seedream 4.5 i2i edit. Two uses: (A) beauty edits per review.edit_prompts; (B) DRAW ANNOTATIONS on the original — red arrows + Chinese labels teaching the user how to reshoot (e.g. 'red arrow above main dish labeling 加蒸汽'). Per skills/hard_skills/xhs_main/SKILL.md, ≥2 unsuccessful rounds MUST drop to REPHOTO and stop editing.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "Local path or public URL of the original image"
+          },
+          "edit_prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Chinese prompts. Beauty: ['提亮整体 +15%','主菜表面增加自然油光']  Annotation: ['用红色箭头在主菜上方标注：加蒸汽','右下角标注：加葱花']"
+          },
+          "save_path": {
+            "type": "string",
+            "description": "[Optional] Output path, default temp/image_review/edited_<ts>.png"
+          }
+        },
+        "required": [
+          "image",
+          "edit_prompts"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_generate",
+      "description": "Call Doubao Seedream 4.5 text-to-image to generate a brand-new image. Atomic capability. Used for: cover fallback / reference shots / composite scenes",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Chinese t2i prompt, the more concrete the better"
+          },
+          "size": {
+            "type": "string",
+            "description": "Size keyword '1K' / '2K' / '4K' or explicit dims like '2048x2048'",
+            "default": "2K"
+          },
+          "save_path": {
+            "type": "string",
+            "description": "[Optional] Output path, default temp/image_review/generated_<ts>.png"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_publish_note",
+      "description": "Publish a set of images + caption as a Xiaohongshu note set to 「仅自己可见」(self-only) (creator center https://creator.xiaohongshu.com/publish/publish). NEW FLOW (2026-06, replaces draft-box/暂存 since phone & desktop drafts don't sync): upload → fill title/body/tags → CDP-pierce set visibility to 仅自己可见 → verify → then click 发布. HARD RULE: never clicks 发布 unless visibility is confirmed as self-only (anti mis-public). Prereqs: CDP bridge attached, creator center logged in, Chrome window focused in foreground (cdp_mouse_click needs focus). Flow: skills/hard_skills/xhs_publish/SKILL.md.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Local image paths (uploaded in order), 1-9. Usually task_dir/edited_*.png or viral_refs/ reuse"
+          },
+          "title": {
+            "type": "string",
+            "description": "Note title (≤20 chars best, pick from review.title_hints)"
+          },
+          "desc": {
+            "type": "string",
+            "description": "Note body (≥200 chars, finalized via review_sop §Step 4.5 template)"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "8-12 topic tags, with or without # (tool auto-prefixes). MUST be extracted from viral_meta.json[covers[*].content.tags] — no fabrication"
+          }
+        },
+        "required": [
+          "images",
+          "title",
+          "desc"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_visual_click",
+      "description": "[The tool that ACTUALLY clicks — use it when you want to 'click'] Use this when hardcoded selectors fail (page redesigned / element not found). Mechanism is Set-of-Marks: enumerate every interactive element in the current viewport and overlay red numeric badges -> screenshot, let the VLM answer a multiple-choice 'which number to click' -> precisely scrollIntoView that element and click it (does NOT rely on VLM coordinates, avoiding mis-clicks). If the target is off-screen, it auto-scrolls up/down to find it. After clicking it captures a page fingerprint to verify a real change happened (verified field). Note: web_learn_page only builds an index and never clicks; the only tools that actually perform actions are this one (and web_visual_fill for typing). Prereq: CDP bridge attached. [Smart] On hit, the resolved selector is auto-cached (.cache/web_locator_cache.json); subsequent calls with same URL + target_desc go fast path. [Typical uses] (1) any site where selectors can't be grabbed (2) operating unfamiliar sites (3) when web_execute_js returns not_found (4) when the target is far down a long page and needs scrolling. Write target_desc with position + appearance + text so the VLM picks correctly.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_desc": {
+            "type": "string",
+            "description": "Natural-language description of the target element. Include relative position + visual features + visible text. e.g. 'the red \"Publish\" button at top-right of the page' / 'the title input box with placeholder \"Enter title\"' / 'the \"Save draft\" button in the lower-middle area'"
+          }
+        },
+        "required": [
+          "target_desc"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_visual_fill",
+      "description": "[Generic fallback] Visually locate an input -> physical click to focus -> CDP insertText to type. Same scenario as web_visual_click, for input fields when selectors fail. [Smart] After the first VLM call, the resolved selector is auto-cached; subsequent calls with the same URL + target_desc go fast path and skip VLM. [Typical uses] (1) any site's form/rich-text editor where selectors can't be grabbed (2) unfamiliar sites (3) React/tiptap/ProseMirror inputs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_desc": {
+            "type": "string",
+            "description": "Natural-language description of the target input (position + appearance + placeholder)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to insert (via CDP insertText, friendly to React/tiptap/ProseMirror)"
+          }
+        },
+        "required": [
+          "target_desc",
+          "text"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_learn_page",
+      "description": "[Indexing only — NEVER performs actions] It merely identifies the current page's interactive elements and writes them to cache. It does NOT click, type, or trigger anything. To actually click/type you MUST then call web_visual_click / web_visual_fill — a successful learn_page only means 'noted where the elements are', not 'did it'. [When to use] Rarely — only when you anticipate operating many elements on the same page and want to pre-build the index to save later VLM cost; otherwise don't use it, just call web_visual_click directly (which also auto-learns into cache on first use). The VLM identifies the main interactive elements in one shot and caches them (.cache/web_locator_cache.json). Prereq: current tab is already on the target page.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url_hint": {
+            "type": "string",
+            "description": "[Optional] hint about the current URL; can be omitted (will auto-read location.href)"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_check_login",
+      "description": "Check Xiaohongshu login status by reading the page's window.__INITIAL_STATE__ user info (zero VLM, stable & fast). Returns {ok, logged_in, nickname, user_id}. Call this first before any read/interact flow to confirm the CDP-bridged Chrome is logged in.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_list_feeds",
+      "description": "Get the Xiaohongshu home recommendation feed (reads window.__INITIAL_STATE__.feed.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token (both are REQUIRED inputs for get_feed_detail / like_feed / favorite_feed / post_comment). Use this to discover notes to interact with.",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_search_feeds",
+      "description": "Search Xiaohongshu content by keyword (reads window.__INITIAL_STATE__.search.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token for downstream tools. Optional filters narrow results.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "Search keyword"
+          },
+          "filters": {
+            "type": "object",
+            "description": "[Optional] Search filters. Keys (all optional): sort_by(综合|最新|最多点赞|最多评论|最多收藏), note_type(不限|视频|图文), publish_time(不限|一天内|一周内|半年内), search_scope(不限|已看过|未看过|已关注), location(不限|同城|附近)"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_get_feed_detail",
+      "description": "Get a note's full detail + comments (reads window.__INITIAL_STATE__.note.noteDetailMap, zero VLM). Requires feed_id + xsec_token obtained from list_feeds / search_feeds. When load_comments=true it scrolls to lazy-load comments. Also detects blocked/deleted/private notes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "Note id (from list_feeds / search_feeds result)"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "Note xsec_token (from list_feeds / search_feeds result)"
+          },
+          "load_comments": {
+            "type": "boolean",
+            "description": "Scroll to lazy-load comments",
+            "default": true
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_user_profile",
+      "description": "Get a user's profile info + note list (reads window.__INITIAL_STATE__.user, zero VLM). Requires user_id + xsec_token obtained from a note/search result.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "Target user id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "User xsec_token (from a note/search result)"
+          }
+        },
+        "required": [
+          "user_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_like_feed",
+      "description": "Like / unlike a note (stable selector first, with state verification). Reads current liked state before acting; if already in the target state it skips (idempotent). Requires feed_id + xsec_token.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "Note id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "Note xsec_token"
+          },
+          "unlike": {
+            "type": "boolean",
+            "description": "true = remove the like instead of adding it",
+            "default": false
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_favorite_feed",
+      "description": "Favorite / unfavorite a note (stable selector first, with state verification). Reads current collected state before acting; if already in the target state it skips (idempotent). Requires feed_id + xsec_token.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "Note id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "Note xsec_token"
+          },
+          "unfavorite": {
+            "type": "boolean",
+            "description": "true = remove the favorite instead of adding it",
+            "default": false
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_post_comment",
+      "description": "Post a top-level comment on a note (stable selector first). Requires feed_id + xsec_token + content.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "Note id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "Note xsec_token"
+          },
+          "content": {
+            "type": "string",
+            "description": "Comment text"
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_reply_comment",
+      "description": "Reply to a specific comment under a note (stable selector first, scrolls to locate the comment). Requires feed_id + xsec_token + content, plus at least one of comment_id / user_id to locate the target comment.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "Note id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "Note xsec_token"
+          },
+          "content": {
+            "type": "string",
+            "description": "Reply text"
+          },
+          "comment_id": {
+            "type": "string",
+            "description": "[Optional] Target comment id (#comment-{id})"
+          },
+          "user_id": {
+            "type": "string",
+            "description": "[Optional] Target comment author user id ([data-user-id]); used when comment_id is unknown"
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_skill",
+      "description": "当总结出有用的流程、prompt、经验时，创建一个新的技能SOP，存入技能库中。以后遇到类似场景即可读取该SOP。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill_name": {
+            "type": "string",
+            "description": "技能名称，英文下划线命名，如 xhs_p_tu_prompt"
+          },
+          "description": {
+            "type": "string",
+            "description": "技能的用途描述"
+          },
+          "sop_content": {
+            "type": "string",
+            "description": "技能的 Markdown 格式的 SOP 内容，包含规则、prompt模板、操作步骤等"
+          }
+        },
+        "required": [
+          "skill_name",
+          "description",
+          "sop_content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_user_preference",
+      "description": "记录或更新用户的习惯、偏好（如修图喜欢暗色调、文案喜欢活泼风格等），并保存到用户画像记忆中。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "偏好分类，如 'image_edit', 'copywriting', 'publish_time' 等"
+          },
+          "content": {
+            "type": "string",
+            "description": "具体的偏好内容"
+          }
+        },
+        "required": [
+          "category",
+          "content"
+        ]
+      }
+    }
+  }
+]

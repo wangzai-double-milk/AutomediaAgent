@@ -1,0 +1,756 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "code_run",
+      "description": "代码执行器。优先使用python。支持Multi-call，并行时用script参数。无script参数时正文代码块会被执行，单次调用优先使用以免转义。禁硬编码大量数据",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "[Optional] 要执行的代码。为免转义建议留空，改用正文代码块（与此参数互斥）"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "python",
+              "powershell"
+            ],
+            "description": "代码类型",
+            "default": "python"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "执行超时时间（秒）",
+            "default": 60
+          },
+          "cwd": {
+            "type": "string",
+            "description": "工作目录，默认为当前工作目录"
+          },
+          "inline_eval": {
+            "type": "boolean",
+            "description": "不允许使用除非明确要求"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_read",
+      "description": "读取文件内容。建议在修改文件前先读取，以确保获取最新的上下文和行号。支持分页读取或关键字搜索",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "文件相对或绝对路径"
+          },
+          "start": {
+            "type": "integer",
+            "description": "起始行号（从 1 开始）"
+          },
+          "count": {
+            "type": "integer",
+            "description": "读取的行数",
+            "default": 200
+          },
+          "keyword": {
+            "type": "string",
+            "description": "可选搜索关键字。如果提供，将返回第一个匹配项（忽略大小写）及其周边的内容"
+          },
+          "show_linenos": {
+            "type": "boolean",
+            "description": "是否显示行号，建议开启以辅助 file_patch 定位",
+            "default": true
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_patch",
+      "description": "精细化局部文件修改。在文件中寻找唯一的 old_content 块并替换为 new_content。要求 old_content 必须在文件中唯一存在，且空格、缩进、换行必须与原文件完全一致。如果匹配失败，请使用 file_read 重新确认文件内容",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "文件路径"
+          },
+          "old_content": {
+            "type": "string",
+            "description": "文件中需要被替换的原始文本块（需确保唯一性）"
+          },
+          "new_content": {
+            "type": "string",
+            "description": "替换后的新文本内容。支持 {{file:路径:起始行:结束行}} 语法引用文件内容，写入前自动展开"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "file_write",
+      "description": "用于文件的新建、全量覆盖或追加写入。对于精细的代码修改，应优先使用 file_patch。写入内容支持 {{file:路径:起始行:结束行}} 语法引用文件片段，写入前自动展开",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "文件路径"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "overwrite",
+              "append",
+              "prepend"
+            ],
+            "description": "写入模式覆盖、追加或在开头追加",
+            "default": "overwrite"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_scan",
+      "description": "获取当前页面的简化HTML内容和标签页列表。会移除隐藏/浮动/被遮盖的元素。切换页面后一般应先调用查看",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "tabs_only": {
+            "type": "boolean",
+            "description": "仅返回标签页列表和当前标签信息，不获取HTML内容"
+          },
+          "switch_tab_id": {
+            "type": "string",
+            "description": "可选的标签页 ID。如果提供，系统将在扫描前切换到该标签页"
+          },
+          "text_only": {
+            "type": "boolean",
+            "description": "只要纯文本不要HTML"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_execute_js",
+      "description": "执行JS。支持Multi-call，用不同switch_tab_id并行操作多标签页。禁止猜测，准确操作以减少 web_scan 调用。无script参数时执行正文 ```javascript 块，以免转义",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "script": {
+            "type": "string",
+            "description": "[Optional] JS代码或路径。为免转义建议留空，改用正文代码块（与此参数互斥）"
+          },
+          "save_to_file": {
+            "type": "string",
+            "description": "结果存文件，适合返回值较长时"
+          },
+          "no_monitor": {
+            "type": "boolean",
+            "description": "跳过页面变更监控，省2-3秒。仅在纯读取信息时设置，页面操作时不要设置"
+          },
+          "switch_tab_id": {
+            "type": "string",
+            "description": "可选的标签页 ID，切换到该标签页执行"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_working_checkpoint",
+      "description": "短期工作便签，每轮自动注入上下文，防长任务信息丢失。前中期调用，非结束时。何时调用：(1)任务开始读SOP后，存用户需求和关键约束/参数（简单1-2步任务除外）；(2)子任务切换或上下文即将被冲刷前；(3)多次重试失败后，重读SOP并必须调用存储新发现；(4)切换新任务时更新内容，清旧进度但保留仍有效的约束。\n\n何时不调用：简单任务（1-2步且无严重约束）、任务已完成时（应当用长期结算工具）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key_info": {
+            "type": "string",
+            "description": "替换当前便签（<200 tokens）。增量更新：先回顾现有内容，保留仍有效的，再增删改。存：要避的坑、用户原始需求、关键参数/发现、文件路径、当前进度、下一步计划。不存：马上要用用完即丢的、上下文中显而易见的、用户已换全新任务时的旧任务信息。宁多更新不丢关键"
+          },
+          "related_sop": {
+            "type": "string",
+            "description": "相关sop名称，可以多个，必要时需要再读"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ask_user",
+      "description": "当需要用户决策、提供额外信息或遇到无法自动解决的阻碍时，调用此工具中断任务并提问",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "向用户提出的明确问题"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "提供给用户的可选快捷选项列表"
+          }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "start_long_term_update",
+      "description": "准备开始提炼记忆。发现值得长期记忆的信息（环境事实/用户偏好/避坑经验）时调用此工具。已记忆更新或在自主流程内时无需调用。超15轮完成的任务必须调用以沉淀经验",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_task_init",
+      "description": "为本次小红书任务建一个 debug 工作区 tasks/<ts>_<slug>/，把用户原图拷贝进去，返回 task_dir。后续中间产物（识图 JSON、爆款图、修图、批注图）都写到这个文件夹方便用户回头排查。仅用于归档调试，不是流程强约束。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_request": {
+            "type": "string",
+            "description": "用户原始请求文本（用于命名工作区）"
+          },
+          "image": {
+            "type": "string",
+            "description": "[可选] 用户提供的图片本地路径，会自动拷贝到工作区"
+          }
+        },
+        "required": [
+          "user_request"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_identify_dish",
+      "description": "调豆包 VLM 看图识菜。返回 {dish_name, category, search_keywords, confidence}。结果会自动存到 task_dir/dish_info.json。【拿到 search_keywords 后用 xhs_search_viral 去搜爆款】。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "图片本地路径"
+          }
+        },
+        "required": [
+          "image"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_search_viral",
+      "description": "跳到小红书搜索页 + 抓前 N 张笔记封面 → 下载到 task_dir/viral_refs/，返回 {reference_images: [本地路径]} 喂给 xhs_image_review。\n小红书默认排序已经足够好，工具单次调用就能跳转 + 抓取 + 下载完成。\n【fetch_content 默认 3】会真实点击 top N 卡片进浮层，把正文 + 话题 tag 抓回 viral_meta.json[covers[i].content]，写文案/标题靠这个。\n需 CDP bridge 接管浏览器、小红书主站已登录。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索词（skip_navigate=true 时可省）"
+          },
+          "top_n": {
+            "type": "integer",
+            "description": "抓多少张爆款封面（默认 10，建议 8-15）",
+            "default": 10
+          },
+          "skip_navigate": {
+            "type": "boolean",
+            "description": "true=不跳转、直接抓当前页（已经在目标页时用）",
+            "default": false
+          },
+          "fetch_content": {
+            "type": "integer",
+            "description": "抓 top N 条笔记的【正文 + 话题 tag】，存进 viral_meta.json[covers[i].content]。**默认 3，写文案必须有这个数据**。显式传 0 才跳过",
+            "default": 3
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_review",
+      "description": "小红书美食封面/配图严格档审核（豆包 VLM 毒舌评判官）。⚠️【强约束】调用前必须先在小红书搜同品类爆款封面并把本地路径放进 reference_images——这是【硬要求】，因为审图依赖与爆款的对比（viral_patterns、gaps_vs_viral、roast 字段都靠它生成）。完整流程见 skills/hard_skills/xhs_main/SKILL.md。返回字段：verdict (PASS|REWORK|REPHOTO) / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / annotation_prompts / roast / title_hints / summary。**不输出评分数字**，只做三档判定 + 毒舌点评 + 修图/重拍指引。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "图片本地路径或公网 URL"
+          },
+          "hint": {
+            "type": "string",
+            "description": "[可选] 菜品提示，例如 '日式拉面，主菜是面+叉烧'，能让评分更准"
+          },
+          "reference_images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "【强烈建议传入】同品类爆款封面参考图列表（路径或 URL），3-5 张。不传时仅做 SOLO 审图，不会输出 viral_patterns/gaps_vs_viral/roast"
+          }
+        },
+        "required": [
+          "image"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_edit",
+      "description": "调豆包 Seedream 4.5 图生图（i2i）。原子能力：输入原图 + 修图话术（多条自动合并），返回保存后的本地路径。两大用法：(A) 修图美化（按 review.edit_prompts）；(B) 在原图上【画批注】教用户怎么拍——例：'在原图主菜上方用红色箭头标注\"加蒸汽\"，左下角标注\"加葱花点缀\"'。多轮编排见 skills/hard_skills/xhs_main/SKILL.md（≥2 轮未通过须强制降级 REPHOTO）",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "description": "原图本地路径或公网 URL"
+          },
+          "edit_prompts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "中文修图话术列表。例 ['提亮整体 +15%','主菜表面增加自然油光'] 或 ['用红色箭头在主菜上方标注：加蒸汽','在右下角标注：加葱花']"
+          },
+          "save_path": {
+            "type": "string",
+            "description": "[可选] 输出路径，默认 temp/image_review/edited_<ts>.png"
+          }
+        },
+        "required": [
+          "image",
+          "edit_prompts"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_image_generate",
+      "description": "调豆包 Seedream 4.5 文生图模型生成一张全新图片。原子能力。常用于：封面图兜底、参考图、合成场景等",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "中文文生图提示词，越具体越好"
+          },
+          "size": {
+            "type": "string",
+            "description": "尺寸，例 '1K' / '2K' / '4K' / '2048x2048'",
+            "default": "2K"
+          },
+          "save_path": {
+            "type": "string",
+            "description": "[可选] 输出路径，默认 temp/image_review/generated_<ts>.png"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_publish_note",
+      "description": "把一组图 + 文案发成小红书笔记，并固定设为「仅自己可见」（创作中心 https://creator.xiaohongshu.com/publish/publish）。新流程（2026-06，取代旧草稿箱/暂存——因手机端电脑端草稿不互通）：上传图文 → 填标题/正文/话题 → CDP 穿透设「仅自己可见」→ 验证通过 → 直接点「发布」。⚠️【硬纪律】可见性未确认为「仅自己可见」绝不点发布（防误公开）。前置：CDP bridge 已接管 Chrome、creator 已登录、Chrome 窗口需在前台聚焦（cdp_mouse_click 依赖窗口聚焦）。流程见 skills/hard_skills/xhs_publish/SKILL.md。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "图片本地路径列表（按顺序上传），1-9 张。来源通常是 task_dir/edited_*.png 或 viral_refs/ 复用"
+          },
+          "title": {
+            "type": "string",
+            "description": "笔记标题（≤20 字最佳，从 review.title_hints 选）"
+          },
+          "desc": {
+            "type": "string",
+            "description": "笔记正文（≥200 字，从 review_sop §Step 4.5 模板生成的成稿）"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "话题标签 8-12 个，可带 # 也可不带（工具自动加 #）。**必须从 viral_meta.json[covers[*].content.tags] 抽取**，不许凭空编"
+          }
+        },
+        "required": [
+          "images",
+          "title",
+          "desc"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_visual_click",
+      "description": "【真正执行点击的工具——要“点”就用它】当硬编码 selector 失效（页面改版/找不到元素）时用这个。机制是 Set-of-Marks：枚举当前视口所有可交互元素并打上红色编号 → 截图让 VLM 做“点哪个编号”的选择题 → 按该元素精确 scrollIntoView 后点击（不靠 VLM 给坐标，规避点偏）。目标若在视口外，会自动上下滚动逐屏查找。点击后抓页面指纹验证是否真触发变化（verified 字段）。注意：web_learn_page 只建索引不点击，真正要点击只有本工具（和输入用的 web_visual_fill）。前置：CDP bridge 已接管。⚡ 命中后自动反查 selector 入缓存（.cache/web_locator_cache.json），同 URL 同 target_desc 后续 fast path 秒杀。【典型用例】：① 任何网站 selector 抓不到时 ② 操作不熟的网站 ③ web_execute_js 返回 not_found 时 ④ 目标在长页面下方需要滚动时。target_desc 写清位置+外观+文字特征，VLM 越好选。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_desc": {
+            "type": "string",
+            "description": "自然语言精确描述目标元素，要带相对位置和外观特征。例：'页面右上角红底白字的\"发布笔记\"按钮' / '标题输入框，placeholder 是\"填写标题\"' / '页面中下部的\"暂存草稿\"按钮'"
+          }
+        },
+        "required": [
+          "target_desc"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_visual_fill",
+      "description": "【通用兜底】视觉定位输入框 → 物理点击聚焦 → CDP insertText 输入文本。同上场景，硬编码 selector 失效时用。⚡ 智能：首次 VLM 调用后会自动学习 selector 入缓存，同 URL 同 target_desc 后续调用直接 fast path 秒杀，免重复 VLM。【典型用例】：① 任何网站表单/富文本编辑器 selector 抓不到时 ② 不熟悉的网站 ③ React/tiptap/ProseMirror 输入。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "target_desc": {
+            "type": "string",
+            "description": "目标输入框的自然语言描述（位置 + 外观 + placeholder）"
+          },
+          "text": {
+            "type": "string",
+            "description": "要输入的文本（CDP insertText，对 React/tiptap/ProseMirror 友好）"
+          }
+        },
+        "required": [
+          "target_desc",
+          "text"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_learn_page",
+      "description": "【只建索引，绝不执行操作】仅把当前页面的交互元素识别并写入缓存，它不会点击、不会输入、不会触发任何动作。⚠️ 要真正点击/输入，必须再调 web_visual_click / web_visual_fill —— learn_page 返回成功只代表“记下了元素在哪”，不代表“做了”。【何时用】：极少数情况——你预判同一页面接下来要连续操作很多元素，想一次性建好索引省后续 VLM 钱时才用；否则不要用它，直接用 web_visual_click 即可（visual_click 首次也会自动学习入缓存）。VLM 一次识别整页元素入缓存（.cache/web_locator_cache.json）。前置：当前 tab 已停留在目标页面。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url_hint": {
+            "type": "string",
+            "description": "[Optional] 当前 URL 描述提示，可省略；不传时会自动取 location.href"
+          }
+        },
+        "required": []
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_check_login",
+      "description": "检查小红书登录状态（读页面 window.__INITIAL_STATE__ 里的用户态，零 VLM，稳定快速）。返回 {ok, logged_in, nickname, user_id}。任何读取/互动流程前先调它，确认 CDP 接管的 Chrome 已登录。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_list_feeds",
+      "description": "获取小红书首页推荐流（读 window.__INITIAL_STATE__.feed.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token（这两个是 get_feed_detail / like_feed / favorite_feed / post_comment 的必填入参）。用它来发现可互动的笔记。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_search_feeds",
+      "description": "按关键词搜索小红书内容（读 window.__INITIAL_STATE__.search.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token 供后续工具使用。可选 filters 做筛选。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keyword": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "filters": {
+            "type": "object",
+            "description": "[可选] 搜索筛选。键均可选：sort_by(综合|最新|最多点赞|最多评论|最多收藏)、note_type(不限|视频|图文)、publish_time(不限|一天内|一周内|半年内)、search_scope(不限|已看过|未看过|已关注)、location(不限|同城|附近)"
+          }
+        },
+        "required": [
+          "keyword"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_get_feed_detail",
+      "description": "获取笔记详情 + 评论（读 window.__INITIAL_STATE__.note.noteDetailMap，零 VLM）。必填 feed_id + xsec_token（从 list_feeds / search_feeds 结果里拿）。load_comments=true 时滚动懒加载评论。同时检测笔记被屏蔽/删除/私密等不可见情况。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "笔记 id（来自 list_feeds / search_feeds 结果）"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "笔记 xsec_token（来自 list_feeds / search_feeds 结果）"
+          },
+          "load_comments": {
+            "type": "boolean",
+            "description": "滚动懒加载评论",
+            "default": true
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_user_profile",
+      "description": "获取用户主页信息 + 笔记列表（读 window.__INITIAL_STATE__.user，零 VLM）。必填 user_id + xsec_token（从笔记/搜索结果里拿）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "目标用户 id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "用户 xsec_token（来自笔记/搜索结果）"
+          }
+        },
+        "required": [
+          "user_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_like_feed",
+      "description": "点赞 / 取消点赞笔记（稳定 selector 优先 + 状态校验）。操作前先读当前 liked 状态，已是目标态则跳过（幂等）。必填 feed_id + xsec_token。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "笔记 id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "笔记 xsec_token"
+          },
+          "unlike": {
+            "type": "boolean",
+            "description": "true = 取消点赞",
+            "default": false
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_favorite_feed",
+      "description": "收藏 / 取消收藏笔记（稳定 selector 优先 + 状态校验）。操作前先读当前 collected 状态，已是目标态则跳过（幂等）。必填 feed_id + xsec_token。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "笔记 id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "笔记 xsec_token"
+          },
+          "unfavorite": {
+            "type": "boolean",
+            "description": "true = 取消收藏",
+            "default": false
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_post_comment",
+      "description": "对笔记发表一级评论（稳定 selector 优先）。必填 feed_id + xsec_token + content。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "笔记 id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "笔记 xsec_token"
+          },
+          "content": {
+            "type": "string",
+            "description": "评论内容"
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_reply_comment",
+      "description": "回复笔记下的指定评论（稳定 selector 优先 + 滚动定位）。必填 feed_id + xsec_token + content，且 comment_id / user_id 至少提供一个用于定位目标评论。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "feed_id": {
+            "type": "string",
+            "description": "笔记 id"
+          },
+          "xsec_token": {
+            "type": "string",
+            "description": "笔记 xsec_token"
+          },
+          "content": {
+            "type": "string",
+            "description": "回复内容"
+          },
+          "comment_id": {
+            "type": "string",
+            "description": "[可选] 目标评论 id（#comment-{id}）"
+          },
+          "user_id": {
+            "type": "string",
+            "description": "[可选] 目标评论作者 user id（[data-user-id]）；comment_id 未知时用它定位"
+          }
+        },
+        "required": [
+          "feed_id",
+          "xsec_token",
+          "content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "vlm_analyze_post",
+      "description": "调用全模态大模型（VLM），结合帖子的多张图片、标题和正文，进行全局维度的联合分析。可以用于拆解爆款的视觉排版、修图参数、文案钩子、用户情绪等，对比当前技能并输出可以沉淀的综合运营 SOP 经验。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "需要分析的图片 URL 或本地绝对路径列表（支持多图，建议传入帖子所有的配图）。"
+        },
+        "video_url": {
+          "type": "string",
+          "description": "需要分析的视频 URL（如果是视频帖子，传入该链接，全模态模型将解析视频内容）。"
+        },
+        "title": {
+            "type": "string",
+            "description": "帖子的标题内容"
+          },
+          "content": {
+            "type": "string",
+            "description": "帖子的正文内容"
+          },
+          "prompt": {
+            "type": "string",
+            "description": "发送给 VLM 的分析指令。例如：'结合标题和文案，分析这组图的排版逻辑、打光和色调参数，以及文案是如何与首图配合吸引减脂人群的，总结出可复用的图文联合 SOP'。"
+          }
+        },
+        "required": [
+          "images",
+          "prompt"
+        ]
+      }
+    }
+  }
+]
