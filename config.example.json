@@ -1,0 +1,11 @@
+{
+  "_README": "复制本文件为 config.json，填入你的火山引擎 API Key 即可。一把 Key 全套通用（LLM 大脑 + 审图 VLM + 生图/改图）。模型名一般无需改动。",
+  "volc_apikey": "ark-在这里填入你的火山引擎APIKey",
+  "volc_apibase": "https://ark.cn-beijing.volces.com/api/v3",
+  "models": {
+    "llm": "doubao-seed-2-0-pro-260215",
+    "vlm": "doubao-seed-2-0-pro-260215",
+    "edit": "doubao-seedream-4-5-251128",
+    "gen": "doubao-seedream-4-5-251128"
+  }
+}

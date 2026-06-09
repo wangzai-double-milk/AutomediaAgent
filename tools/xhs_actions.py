@@ -21,12 +21,26 @@
 selector 命中失败时由上层（ga.py 工具）决定是否回退 web_vision 的 VLM 兜底。
 """
 
+import os
 import json
 import time
 import logging
 from urllib.parse import urlencode
 
+# 规则1：调用外部接口（浏览器 JS 注入 / 互动操作）落盘到 logs/xhs_actions.log，方便查问题。
+_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+os.makedirs(_LOG_DIR, exist_ok=True)
 _logger = logging.getLogger('xhs_actions')
+if not _logger.handlers:
+    _logger.setLevel(logging.INFO)
+    _fmt = logging.Formatter('%(asctime)s %(levelname)s [xhs_actions] %(message)s',
+                             datefmt='%Y-%m-%d %H:%M:%S')
+    _fh = logging.FileHandler(os.path.join(_LOG_DIR, 'xhs_actions.log'), encoding='utf-8')
+    _fh.setFormatter(_fmt)
+    _logger.addHandler(_fh)
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(_fmt)
+    _logger.addHandler(_sh)
 
 
 # ───────────────────────── 稳定 selector（实测，2026-06 真实页面校正） ─────────────────────────
@@ -50,7 +64,16 @@ SELECTORS = {
 def _exec(script, switch_tab_id=None):
     """执行 JS，返回原始 web_execute_js 结果 dict。"""
     from ga import web_execute_js
-    return web_execute_js(script, switch_tab_id=switch_tab_id, no_monitor=True)
+    _snippet = ' '.join(script.split())[:80]
+    _logger.info('web_execute_js tab=%s js=%s...', switch_tab_id, _snippet)
+    _t0 = time.time()
+    try:
+        res = web_execute_js(script, switch_tab_id=switch_tab_id, no_monitor=True)
+    except Exception as e:
+        _logger.error('web_execute_js 异常 (%.1fs): %s', time.time() - _t0, e)
+        raise
+    _logger.info('web_execute_js 完成 (%.1fs)', time.time() - _t0)
+    return res
 
 
 def _exec_json(script, switch_tab_id=None):

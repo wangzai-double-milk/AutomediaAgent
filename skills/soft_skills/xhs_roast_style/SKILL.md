@@ -1,6 +1,6 @@
 ---
 name: xhs_roast_style
-description: "被 [`../xhs_review/SKILL.md`](../xhs_review/SKILL.md) §Step 4.5 / §Step 5b、未来的 publish_sop 引用。"
+description: "小红书审图「毒舌」输出环节的语风规范与禁令（不是 prompt 本身）。被 ../xhs_review/SKILL.md §Step 4.5 / §Step 5b、未来的 publish_sop 引用，统一 roast 字段的调性。"
 tags:
   - xiaohongshu
   - agent_sop
@@ -8,7 +8,7 @@ tags:
 # xhs_roast_style · 毒舌语风规范
 
 > 被 [`../xhs_review/SKILL.md`](../xhs_review/SKILL.md) §Step 4.5 / §Step 5b、未来的 publish_sop 引用。
-> 风格已经写进 [`tools/image.py`](../tools/image.py) 的 `SYSTEM_PROMPT_WITH_REFS`，本文是**输出环节的格式规范 + 禁令**，不是 prompt 本身。
+> 审图毒舌风格的提示词在 [`../xhs_review_prompt/`](../xhs_review_prompt/SKILL.md)（review_solo.md / review_with_refs.md），本文是**输出环节的格式规范 + 禁令**，不是 prompt 本身。
 
 ## 1. 调性原则
 

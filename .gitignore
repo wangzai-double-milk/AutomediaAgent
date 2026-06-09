@@ -22,9 +22,10 @@ dist/
 Thumbs.db
 
 # Sensitive files (API keys, credentials)
-mykey.py
+config.json
 .env
 auth.json
+mykey.json
 
 # Runtime temp files (logs, videos, downloads)
 temp/

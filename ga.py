@@ -2659,4 +2659,15 @@ def get_global_memory():
         prompt += structure + '\n../memory/global_mem_insight.txt:\n'
         prompt += insight + "\n"
     except FileNotFoundError: pass
+    # 读回用户偏好（do_update_user_preference 写入 memory/user_profile.json）。
+    # 之前只写不读导致"记住偏好"断链，这里在每次拼装记忆时注入，让 agent 冷启动即知用户偏好。
+    try:
+        profile_path = os.path.join(script_dir, 'memory/user_profile.json')
+        if os.path.exists(profile_path):
+            with open(profile_path, 'r', encoding='utf-8') as f: profile = json.load(f)
+            if profile:
+                prompt += "\n[User Preferences] (../memory/user_profile.json) —— 已知的用户偏好/历史方向，决策时优先参考：\n"
+                for k, v in profile.items():
+                    prompt += f"- {k}: {v}\n"
+    except Exception: pass
     return prompt
