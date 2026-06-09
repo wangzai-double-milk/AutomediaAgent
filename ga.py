@@ -166,15 +166,15 @@ def log_memory_access(path):
 # xhs 核心工具 → 执行前必须先 file_read 的 SOP（硬 gate）。
 # 用户要求："P 图前必须看一下 P 图 skills"，推广到所有核心操作：先读对应 SOP 再动手。
 XHS_TOOL_SOP_GATE = {
-    'xhs_search_viral': 'skills/core/xhs_search/SKILL.md',
-    'xhs_image_review': 'skills/core/xhs_review/SKILL.md',
-    'xhs_image_edit': 'skills/core/xhs_edit/SKILL.md',
-    'xhs_image_generate': 'skills/core/xhs_edit/SKILL.md',
-    'xhs_publish_note': 'skills/core/xhs_publish/SKILL.md',
-    'xhs_like_feed': 'skills/core/xhs_interact/SKILL.md',
-    'xhs_favorite_feed': 'skills/core/xhs_interact/SKILL.md',
-    'xhs_post_comment': 'skills/core/xhs_interact/SKILL.md',
-    'xhs_reply_comment': 'skills/core/xhs_interact/SKILL.md',
+    'xhs_search_viral': 'skills/hard_skills/xhs_search/SKILL.md',
+    'xhs_image_review': 'skills/hard_skills/xhs_review/SKILL.md',
+    'xhs_image_edit': 'skills/soft_skills/xhs_edit/SKILL.md',
+    'xhs_image_generate': 'skills/soft_skills/xhs_edit/SKILL.md',
+    'xhs_publish_note': 'skills/hard_skills/xhs_publish/SKILL.md',
+    'xhs_like_feed': 'skills/hard_skills/xhs_interact/SKILL.md',
+    'xhs_favorite_feed': 'skills/hard_skills/xhs_interact/SKILL.md',
+    'xhs_post_comment': 'skills/hard_skills/xhs_interact/SKILL.md',
+    'xhs_reply_comment': 'skills/hard_skills/xhs_interact/SKILL.md',
 }
 
 def web_execute_js(script, switch_tab_id=None, no_monitor=False):
@@ -819,10 +819,12 @@ class GenericAgentHandler(BaseHandler):
         result = smart_format(result, max_str_len=maxlen, omit_str='\n\n[omitted long content]\n\n')
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         log_memory_access(path)
-        if 'memory' in path or 'sop' in path: 
+        if 'memory' in path or 'sop' in path or 'skill' in path.lower(): 
             next_prompt += "\n[SYSTEM TIPS] 正在读取记忆或SOP文件，若决定按sop执行请提取sop中的关键点（特别是靠后的）update working memory."
-            # 记录本任务读过的 SOP（供 xhs 工具 SOP gate 校验）
-            self.working.setdefault('read_sops', set()).add(os.path.basename(path))
+            # 记录本任务读过的 SOP（供 xhs 工具 SOP gate 校验）。
+            # 存归一化后的完整路径（而非 basename），因为所有技能都叫 SKILL.md，
+            # basename 无法区分 domain，gate 的 `domain in r` 必须能匹配到路径里的 domain 段。
+            self.working.setdefault('read_sops', set()).add(path.replace('\\', '/'))
         return StepOutcome(result, next_prompt=next_prompt)
     
     def _in_plan_mode(self): return self.working.get('in_plan_mode')
@@ -958,6 +960,7 @@ class GenericAgentHandler(BaseHandler):
         返回 None 放行；返回 StepOutcome 表示拦截。_index>0（同批多工具的非首个）不重复拦。'''
         # 提取需要校验的技能 domain (如 xhs_edit, xhs_publish)
         domain_map = {
+            'xhs_search_viral': 'xhs_search',
             'xhs_image_generate': 'xhs_edit',
             'xhs_image_edit': 'xhs_edit',
             'xhs_image_review': 'xhs_review',
@@ -974,10 +977,11 @@ class GenericAgentHandler(BaseHandler):
             
         read = self.working.get('read_sops') or set()
         
-        # 只要读过包含该 domain 且以 SKILL.md 结尾的文件即可 (兼容 hard_skills / soft_skills)
+        # 只要读过路径里包含该 domain 且以 skill.md 结尾的文件即可 (兼容 hard_skills / soft_skills，大小写不敏感)
         passed = False
         for r in read:
-            if domain in r and r.endswith('SKILL.md'):
+            rl = r.lower()
+            if domain in rl and rl.endswith('skill.md'):
                 passed = True
                 break
                 
