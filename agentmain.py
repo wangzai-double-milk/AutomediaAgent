@@ -296,8 +296,22 @@ if __name__ == '__main__':
                                  f'\x1b[90m· cli · model:\x1b[0m {model}\n')
                 sys.stdout.flush()
             except Exception: pass
+        def _read_input_block():
+            # 读一行；若是“粘贴”（多行瞬间涌入 stdin），把紧随其后的行一并收下合成一段，
+            # 否则剩余行会在下一轮 input() 被逐行当成独立任务，导致 agent 自己跑下去。
+            first = input('> ')
+            extra = []
+            try:
+                import select
+                while sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+                    line = sys.stdin.readline()
+                    if not line: break
+                    extra.append(line.rstrip('\n'))
+            except Exception:
+                pass
+            return '\n'.join([first] + extra).strip()
         while True:
-            q = input('> ').strip()
+            q = _read_input_block()
             if not q: continue
             try:
                 dq = agent.put_task(q, source='user')

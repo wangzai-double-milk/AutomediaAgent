@@ -8,5 +8,5 @@
 约定：
     - 每个公开函数返回普通 dict / str，便于 ga.py 中的 do_xxx 直接 json.dumps 给模型。
     - 不写 print 到 stdout（除非是 CLI 入口），日志一律走 logger 或返回字段。
-    - 业务编排（多步流程、找爆款、调侃用户等）放在 skills/hard_skills/xhs_main/SKILL.md，不写在这里。
+    - 业务编排（多步流程、找爆款、调侃用户等）由 skills 层 SOP 驱动（总入口 skills/hard_skills/agent_core/SKILL.md，小红书方言 skills/hard_skills/xhs_main/SKILL.md），不写在这里。
 """

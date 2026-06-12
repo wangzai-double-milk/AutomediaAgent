@@ -507,7 +507,7 @@
     "type": "function",
     "function": {
       "name": "xhs_list_feeds",
-      "description": "获取小红书首页推荐流（读 window.__INITIAL_STATE__.feed.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token（这两个是 get_feed_detail / like_feed / favorite_feed / post_comment 的必填入参）。用它来发现可互动的笔记。",
+      "description": "获取小红书首页推荐流（读 window.__INITIAL_STATE__.feed.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token + xsec_source（这三个是 get_feed_detail / like_feed / favorite_feed / post_comment 的入参；xsec_source 要原样透传，避免 token/source 错配被风控）。这里 xsec_source 是 'pc_feed'。用它来发现可互动的笔记。",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -518,7 +518,7 @@
     "type": "function",
     "function": {
       "name": "xhs_search_feeds",
-      "description": "按关键词搜索小红书内容（读 window.__INITIAL_STATE__.search.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token 供后续工具使用。可选 filters 做筛选。",
+      "description": "按关键词搜索小红书内容（读 window.__INITIAL_STATE__.search.feeds，零 VLM）。返回精简笔记列表，每条含 id + xsec_token + xsec_source 供后续工具使用。这里 xsec_source 是 'pc_search'——必须把它透传给 get_feed_detail/互动类工具，否则 token 与 source 错配会触发风控（error_code 300031，'当前笔记暂时无法浏览'）。可选 filters 做筛选。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -553,6 +553,10 @@
             "type": "string",
             "description": "笔记 xsec_token（来自 list_feeds / search_feeds 结果）"
           },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选但重要] token 的来源页。把随 token 一起返回的 xsec_source 原样透传（搜索结果→'pc_search'，首页流→'pc_feed'）。错配会触发风控。默认 'pc_feed'。"
+          },
           "load_comments": {
             "type": "boolean",
             "description": "滚动懒加载评论",
@@ -581,6 +585,10 @@
           "xsec_token": {
             "type": "string",
             "description": "用户 xsec_token（来自笔记/搜索结果）"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选] token 的来源页；把随 token 一起返回的 xsec_source 原样透传。默认 'pc_note'。"
           }
         },
         "required": [
@@ -610,6 +618,10 @@
             "type": "boolean",
             "description": "true = 取消点赞",
             "default": false
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选] token 的来源页；把随 token 一起返回的 xsec_source 原样透传（搜索→'pc_search'）。默认 'pc_feed'。"
           }
         },
         "required": [
@@ -639,6 +651,10 @@
             "type": "boolean",
             "description": "true = 取消收藏",
             "default": false
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选] token 的来源页；把随 token 一起返回的 xsec_source 原样透传（搜索→'pc_search'）。默认 'pc_feed'。"
           }
         },
         "required": [
@@ -667,6 +683,10 @@
           "content": {
             "type": "string",
             "description": "评论内容"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选] token 的来源页；把随 token 一起返回的 xsec_source 原样透传（搜索→'pc_search'）。默认 'pc_feed'。"
           }
         },
         "required": [
@@ -704,6 +724,10 @@
           "user_id": {
             "type": "string",
             "description": "[可选] 目标评论作者 user id（[data-user-id]）；comment_id 未知时用它定位"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[可选] token 的来源页；把随 token 一起返回的 xsec_source 原样透传（搜索→'pc_search'）。默认 'pc_feed'。"
           }
         },
         "required": [
@@ -749,6 +773,59 @@
         "required": [
           "images",
           "prompt"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_skill",
+      "description": "当总结出有用的流程、prompt、经验时，创建一个新的技能SOP，存入技能库中。以后遇到类似场景即可读取该SOP。这是 L3 结晶能力：把跑通的探索流程沉淀成专用工具/SOP。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "skill_name": {
+            "type": "string",
+            "description": "技能名称，英文下划线命名，如 xhs_p_tu_prompt"
+          },
+          "description": {
+            "type": "string",
+            "description": "技能的用途描述"
+          },
+          "sop_content": {
+            "type": "string",
+            "description": "技能的 Markdown 格式的 SOP 内容，包含规则、prompt模板、操作步骤等"
+          }
+        },
+        "required": [
+          "skill_name",
+          "description",
+          "sop_content"
+        ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_user_preference",
+      "description": "记录或更新用户的习惯、偏好（如修图喜欢暗色调、文案喜欢活泼风格等），并保存到用户画像记忆中。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "偏好分类，如 'image_edit', 'copywriting', 'publish_time' 等"
+          },
+          "content": {
+            "type": "string",
+            "description": "具体的偏好内容"
+          }
+        },
+        "required": [
+          "category",
+          "content"
         ]
       }
     }

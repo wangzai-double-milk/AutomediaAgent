@@ -546,7 +546,7 @@
     "type": "function",
     "function": {
       "name": "xhs_list_feeds",
-      "description": "Get the Xiaohongshu home recommendation feed (reads window.__INITIAL_STATE__.feed.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token (both are REQUIRED inputs for get_feed_detail / like_feed / favorite_feed / post_comment). Use this to discover notes to interact with.",
+      "description": "Get the Xiaohongshu home recommendation feed (reads window.__INITIAL_STATE__.feed.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token + xsec_source (all three are inputs for get_feed_detail / like_feed / favorite_feed / post_comment; pass xsec_source through verbatim to avoid token/source mismatch risk control). xsec_source here is 'pc_feed'. Use this to discover notes to interact with.",
       "parameters": {
         "type": "object",
         "properties": {}
@@ -557,7 +557,7 @@
     "type": "function",
     "function": {
       "name": "xhs_search_feeds",
-      "description": "Search Xiaohongshu content by keyword (reads window.__INITIAL_STATE__.search.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token for downstream tools. Optional filters narrow results.",
+      "description": "Search Xiaohongshu content by keyword (reads window.__INITIAL_STATE__.search.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token + xsec_source for downstream tools. xsec_source here is 'pc_search' — you MUST pass it through to get_feed_detail/interact tools, otherwise the token/source mismatch triggers risk control (error_code 300031, '当前笔记暂时无法浏览'). Optional filters narrow results.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -592,6 +592,10 @@
             "type": "string",
             "description": "Note xsec_token (from list_feeds / search_feeds result)"
           },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional but IMPORTANT] The token's origin page. Pass through the xsec_source returned alongside the token (search result → 'pc_search', home feed → 'pc_feed'). Mismatch triggers risk control. Defaults to 'pc_feed'."
+          },
           "load_comments": {
             "type": "boolean",
             "description": "Scroll to lazy-load comments",
@@ -620,6 +624,10 @@
           "xsec_token": {
             "type": "string",
             "description": "User xsec_token (from a note/search result)"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional] The token's origin page; pass through the xsec_source returned alongside the token. Defaults to 'pc_note'."
           }
         },
         "required": [
@@ -649,6 +657,10 @@
             "type": "boolean",
             "description": "true = remove the like instead of adding it",
             "default": false
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional] The token's origin page; pass through the xsec_source returned with the token (search → 'pc_search'). Defaults to 'pc_feed'."
           }
         },
         "required": [
@@ -678,6 +690,10 @@
             "type": "boolean",
             "description": "true = remove the favorite instead of adding it",
             "default": false
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional] The token's origin page; pass through the xsec_source returned with the token (search → 'pc_search'). Defaults to 'pc_feed'."
           }
         },
         "required": [
@@ -706,6 +722,10 @@
           "content": {
             "type": "string",
             "description": "Comment text"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional] The token's origin page; pass through the xsec_source returned with the token (search → 'pc_search'). Defaults to 'pc_feed'."
           }
         },
         "required": [
@@ -743,6 +763,10 @@
           "user_id": {
             "type": "string",
             "description": "[Optional] Target comment author user id ([data-user-id]); used when comment_id is unknown"
+          },
+          "xsec_source": {
+            "type": "string",
+            "description": "[Optional] The token's origin page; pass through the xsec_source returned with the token (search → 'pc_search'). Defaults to 'pc_feed'."
           }
         },
         "required": [

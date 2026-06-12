@@ -7,7 +7,7 @@ tags:
 ---
 # xhs_roast_style · 毒舌语风规范
 
-> 被 [`../xhs_review/SKILL.md`](../xhs_review/SKILL.md) §Step 4.5 / §Step 5b、未来的 publish_sop 引用。
+> 被 [`../../hard_skills/xhs_review/SKILL.md`](../../hard_skills/xhs_review/SKILL.md) §Step 4.5 / §Step 5b、未来的 publish_sop 引用。
 > 审图毒舌风格的提示词在 [`../xhs_review_prompt/`](../xhs_review_prompt/SKILL.md)（review_solo.md / review_with_refs.md），本文是**输出环节的格式规范 + 禁令**，不是 prompt 本身。
 
 ## 1. 调性原则

@@ -1271,10 +1271,19 @@ class GenericAgentHandler(BaseHandler):
         # 改为：先确保在 xiaohongshu.com 域名（首页裸导航是安全的），再在页内 realClick 模拟真实搜索行为。
         if not skip_navigate:
             try:
+                # 必须确保停在「能正常发起搜索」的页面（首页/探索/搜索结果）。
+                # 若残留在笔记详情页(/explore/<id>)、用户页(/user)等内页，页内搜索框点击不会整页跳转，
+                # 会导致在内页 DOM 找不到笔记卡片 → search_viral_empty。故内页也要先回首页复位。
                 ensure_home_js = (
                     "(function(){"
                     "  if(location.hostname.indexOf('xiaohongshu.com')<0){"
-                    "    location.href='https://www.xiaohongshu.com';"
+                    "    location.href='https://www.xiaohongshu.com/explore';"
+                    "    return 'navigating_home';"
+                    "  }"
+                    "  var p=location.pathname||'';"
+                    "  var onSearchablePage = /^\\/(explore|search_result)\\/?$/.test(p);"
+                    "  if(!onSearchablePage){"
+                    "    location.href='https://www.xiaohongshu.com/explore';"
                     "    return 'navigating_home';"
                     "  }"
                     "  return 'already_on_xhs';"
@@ -1282,7 +1291,7 @@ class GenericAgentHandler(BaseHandler):
                 )
                 r = web_execute_js(ensure_home_js)
                 if 'navigating_home' in str(self._js_ret(r)):
-                    yield '  → 不在小红书域名，先跳首页...\n'
+                    yield '  → 不在可搜索页（域名/内页），先回首页复位...\n'
                     time.sleep(4.0)
                 # 页内真实搜索：填搜索框 → realClick 搜索按钮（找不到按钮派 Enter / form submit 兜底）
                 search_js = (
@@ -2449,11 +2458,12 @@ class GenericAgentHandler(BaseHandler):
         if not feed_id or not xsec_token:
             return StepOutcome({'status': 'error', 'msg': 'feed_id 和 xsec_token 必填'}, next_prompt='\n')
         load_comments = bool(args.get('load_comments', True))
+        xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'detail {feed_id}'[:40])
         task.append_trace('get_feed_detail_start', {'feed_id': feed_id, 'load_comments': load_comments})
         try:
-            r = a.get_feed_detail(feed_id, xsec_token, load_comments=load_comments)
+            r = a.get_feed_detail(feed_id, xsec_token, load_comments=load_comments, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('get_feed_detail_error', {'error': str(e)})
@@ -2471,11 +2481,12 @@ class GenericAgentHandler(BaseHandler):
         xsec_token = (args.get('xsec_token') or '').strip()
         if not user_id or not xsec_token:
             return StepOutcome({'status': 'error', 'msg': 'user_id 和 xsec_token 必填'}, next_prompt='\n')
+        xsec_source = (args.get('xsec_source') or 'pc_note').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'profile {user_id}'[:40])
         task.append_trace('user_profile_start', {'user_id': user_id})
         try:
-            r = a.user_profile(user_id, xsec_token)
+            r = a.user_profile(user_id, xsec_token, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('user_profile_error', {'error': str(e)})
@@ -2495,11 +2506,12 @@ class GenericAgentHandler(BaseHandler):
         if not feed_id or not xsec_token:
             return StepOutcome({'status': 'error', 'msg': 'feed_id 和 xsec_token 必填'}, next_prompt='\n')
         unlike = bool(args.get('unlike', False))
+        xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'like {feed_id}'[:40])
         task.append_trace('like_feed_start', {'feed_id': feed_id, 'unlike': unlike})
         try:
-            r = a.like_feed(feed_id, xsec_token, unlike=unlike)
+            r = a.like_feed(feed_id, xsec_token, unlike=unlike, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('like_feed_error', {'error': str(e)})
@@ -2518,11 +2530,12 @@ class GenericAgentHandler(BaseHandler):
         if not feed_id or not xsec_token:
             return StepOutcome({'status': 'error', 'msg': 'feed_id 和 xsec_token 必填'}, next_prompt='\n')
         unfavorite = bool(args.get('unfavorite', False))
+        xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'fav {feed_id}'[:40])
         task.append_trace('favorite_feed_start', {'feed_id': feed_id, 'unfavorite': unfavorite})
         try:
-            r = a.favorite_feed(feed_id, xsec_token, unfavorite=unfavorite)
+            r = a.favorite_feed(feed_id, xsec_token, unfavorite=unfavorite, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('favorite_feed_error', {'error': str(e)})
@@ -2540,11 +2553,12 @@ class GenericAgentHandler(BaseHandler):
         content = args.get('content') or ''
         if not feed_id or not xsec_token or not content:
             return StepOutcome({'status': 'error', 'msg': 'feed_id / xsec_token / content 必填'}, next_prompt='\n')
+        xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'comment {feed_id}'[:40])
         task.append_trace('post_comment_start', {'feed_id': feed_id, 'len': len(content)})
         try:
-            r = a.post_comment(feed_id, xsec_token, content)
+            r = a.post_comment(feed_id, xsec_token, content, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('post_comment_error', {'error': str(e)})
@@ -2567,11 +2581,12 @@ class GenericAgentHandler(BaseHandler):
             return StepOutcome({'status': 'error', 'msg': 'feed_id / xsec_token / content 必填'}, next_prompt='\n')
         if not comment_id and not user_id:
             return StepOutcome({'status': 'error', 'msg': 'comment_id 或 user_id 至少一个'}, next_prompt='\n')
+        xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
         a = self._xhs_actions()
         task = self._xhs_task(); task.ensure_task(hint=f'reply {feed_id}'[:40])
         task.append_trace('reply_comment_start', {'feed_id': feed_id, 'comment_id': comment_id, 'user_id': user_id})
         try:
-            r = a.reply_comment(feed_id, xsec_token, content, comment_id=comment_id, user_id=user_id)
+            r = a.reply_comment(feed_id, xsec_token, content, comment_id=comment_id, user_id=user_id, xsec_source=xsec_source)
         except Exception as e:
             traceback.print_exc()
             task.append_trace('reply_comment_error', {'error': str(e)})

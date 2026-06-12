@@ -75,7 +75,7 @@ REWORK  → 进 Step 4 修图闭环
 REPHOTO → 进 Step 6 调侃 + 画批注示意图
 ```
 
-## Step 4️⃣ REWORK 闭环（最多 2 轮，详见 [../xhs_edit/SKILL.md](../xhs_edit/SKILL.md)）
+## Step 4️⃣ REWORK 闭环（最多 2 轮，详见 [../../soft_skills/xhs_edit/SKILL.md](../../soft_skills/xhs_edit/SKILL.md)）
 
 ⚠️ **每一轮都基于 `original.jpg` 重 P，不要在上一轮的 edited 上再 P**（Seedream 多轮叠加会越 P 越坏，已被坑过 → Turn5 P 完 Turn7 就被判 REPHOTO 的就是这个 bug）。
 
@@ -188,7 +188,7 @@ xhs_image_edit(
 4. **additional_shots_needed** —— 具体重拍角度
 5. **3 张爆款参考图本地路径** —— 直观对比
 
-格式禁令 / 调性示例：详见 [../xhs_roast_style/SKILL.md](../xhs_roast_style/SKILL.md)。
+格式禁令 / 调性示例：详见 [../../soft_skills/xhs_roast_style/SKILL.md](../../soft_skills/xhs_roast_style/SKILL.md)。
 
 ## 失败排查（review 闭环常见）
 

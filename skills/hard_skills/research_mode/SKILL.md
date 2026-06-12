@@ -1,16 +1,18 @@
 ---
 name: research_mode
-description: "【模式A·研究】用户来社交媒体找信息/做功课，要一份总结。如『我想知道怎么健身』『有哪些减脂餐』『大家都怎么拍X』『帮我调研下这个赛道』。目的：自己浏览大量帖子→交叉验证→产出结构化文档给用户，不发帖。由 xhs_main 冷启动判定为 A 类后进入。"
+description: "【模式A·研究·平台无关】用户来找信息/做功课，要一份总结。如『我想知道怎么健身』『有哪些减脂餐』『大家都怎么拍X』『帮我调研下这个赛道』。目的：从一个或多个渠道浏览大量内容→交叉验证→产出结构化文档给用户，不发帖。由 agent_core 冷启动判定为 A 类后进入。"
 tags:
-  - social_media
+  - agent_core
   - agent_sop
   - research
+  - cross_platform
 ---
 # 模式 A · 研究模式（消费信息 → 出文档）
 
-> 由 [`../xhs_main/SKILL.md`](../xhs_main/SKILL.md) 冷启动判定为 **A 类**后进入。
+> 由 [`../agent_core/SKILL.md`](../agent_core/SKILL.md) 冷启动判定为 **A 类**后进入。
 > 本模式只**消费/总结**信息，**产出是一份文档**，**不发帖、不动账号**。
-> 任何一步"不知道怎么做/信息不够" → 触发[`../../soft_skills/search_anywhere/SKILL.md`](../../soft_skills/search_anywhere/SKILL.md)。
+> **平台无关**：下文以小红书方言工具举例，但研究可来自任意渠道——该去哪几个平台读、怎么读，交给[渠道经纪层](../../soft_skills/search_anywhere/SKILL.md) 决定。没有方言工具的平台（知乎/B站/抖音…）借道 [`../explore_mode/SKILL.md`](../explore_mode/SKILL.md) 视觉抓取。
+> 任何一步"不知道怎么做/信息不够" → 触发[渠道经纪层](../../soft_skills/search_anywhere/SKILL.md)。
 
 ## 何时进入
 用户想"找信息/做功课/要个总结"，例如：
@@ -26,11 +28,13 @@ tags:
 - 先建工作区：`xhs_task_init(user_request=...)` 拿到 `task_dir`。
 - 把主题拆成 1~3 个**检索关键词**（站内搜索一次只吃一个 keyword）。
 
-### Step 2 — 站内检索抓 Top-N 高赞笔记
-- 用 `xhs_search_viral(keyword, top_n=10, fetch_content=5)` 抓爆款封面 + 前 N 篇正文。
+### Step 2 — 选定渠道并抓取 Top-N 高赞内容
+- **先选渠道**（见[渠道经纪层](../../soft_skills/search_anywhere/SKILL.md)）：主题适合哪个平台？生活种草→小红书；深度原理→知乎；教程测评→B站。可并行多个。
+- **小红书（已有方言，最快）**：用 `xhs_search_viral(keyword, top_n=10, fetch_content=5)` 抓爆款封面 + 前 N 篇正文。
   - `top_n` 控制看多少封面，`fetch_content` 控制真正点进去抓正文+多图+评论的篇数。
   - 多个关键词就多调几次。需要更精准的筛选（最新/最多点赞/图文/一周内）可改用 `xhs_search_feeds(keyword, filters=...)` 再 `xhs_get_feed_detail` 逐条取详情。
-- 结果已落盘到 `task_dir/viral_refs/`（封面 + 多图 + `viral_meta.json`）。
+  - 结果已落盘到 `task_dir/viral_refs/`（封面 + 多图 + `viral_meta.json`）。
+- **其它平台（无方言）**：借道 [`../explore_mode/SKILL.md`](../explore_mode/SKILL.md) + [`../perception_action/SKILL.md`](../perception_action/SKILL.md)，像人一样打开它的搜索、读结果，把要点落盘到 `task_dir`。
 
 ### Step 3 — 逐篇深读（正文 + 图内文字 + 高赞评论）
 - `viral_meta.json` 里每篇的 `content` 含 `desc`（正文）、`image_texts`（**图内 OCR，攻略经常藏这**）、`comments`（评论区，干货/避坑也常在这）。
@@ -63,7 +67,7 @@ tags:
 3. **网络** `web_scan`+`web_execute_js` 开 Google —— 站内说法矛盾/需要权威佐证时兜底。
 
 ## 纪律
-1. **不发帖、不互动**：研究模式只读不写账号；要点赞/评论/发布说明判错了模式，回 `xhs_main` 重新分类。
+1. **不发帖、不互动**：研究模式只读不写账号；要点赞/评论/发布说明判错了模式，回 [`../agent_core/SKILL.md`](../agent_core/SKILL.md) 重新分类。
 2. **结论必有出处**：每条都能追到笔记或搜索，禁止编。
 3. **够用即止**：覆盖到能回答用户问题就出文档，不要无限刷帖。
 4. 文件用绝对路径（`task_dir` 下）。

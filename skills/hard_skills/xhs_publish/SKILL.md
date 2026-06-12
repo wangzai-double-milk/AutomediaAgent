@@ -50,7 +50,7 @@ xhs_publish_note(
 
 ## 2. 前置条件（缺一不可）
 
-1. **CDP bridge 已接管 Chrome**（参考 [memory/tmwebdriver_sop.md](tmwebdriver_sop.md)）
+1. **CDP bridge 已接管 Chrome**（参考 [memory/tmwebdriver_sop.md](../../../memory/tmwebdriver_sop.md)）
 2. **创作中心已登录**（`https://creator.xiaohongshu.com/` 能直接进，不弹登录）
 3. **task_dir 存在**（review_sop §Step 0a 建好）
 4. **图片真实存在**：建议传 `task_dir/edited_*.png` 绝对路径

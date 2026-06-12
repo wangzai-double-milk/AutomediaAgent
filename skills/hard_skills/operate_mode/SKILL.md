@@ -1,16 +1,18 @@
 ---
 name: operate_mode
-description: "【模式B·运营】用户让 Agent 独自/持续运营账号。如『帮我运营这个号』『你来打理』『定个方向持续发』『看看数据要不要投流』。流程：定方向→选题→创作→发布→数据回流→分析决策（含投流判断）→复盘。生产内容并对账号负责。由 xhs_main 冷启动判定为 B 类后进入。"
+description: "【模式B·运营·平台无关】用户让 Agent 独自/持续运营账号。如『帮我运营这个号』『你来打理』『定个方向持续发』『看看数据要不要投流』。流程：定方向→选题→创作→发布→数据回流→分析决策（含投流判断）→复盘。生产内容并对账号负责。由 agent_core 冷启动判定为 B 类后进入。"
 tags:
-  - social_media
+  - agent_core
   - agent_sop
   - operate
+  - cross_platform
 ---
 # 模式 B · 运营模式（生产内容 → 对账号负责）
 
-> 由 [`../xhs_main/SKILL.md`](../xhs_main/SKILL.md) 冷启动判定为 **B 类**后进入。
+> 由 [`../agent_core/SKILL.md`](../agent_core/SKILL.md) 冷启动判定为 **B 类**后进入。
 > 与研究模式（只读、出文档）不同，本模式要**生产内容、发帖、看数据、判断投流**，对账号长期负责。
-> 任何一步"不知道怎么做" → 触发 [`../../soft_skills/search_anywhere/SKILL.md`](../../soft_skills/search_anywhere/SKILL.md)。**禁止凭空编方向/选题/文案/SOP。**
+> **平台无关**：下文以小红书方言工具举例，流程本身（定方向→选题→创作→发布→数据→投流→复盘）通用于任意平台。运营的是哪个平台的账号、用什么工具，由[渠道经纪层](../../soft_skills/search_anywhere/SKILL.md)与平台方言决定；没有方言的平台借道 [`../explore_mode/SKILL.md`](../explore_mode/SKILL.md) 操作。
+> 任何一步"不知道怎么做" → 触发[渠道经纪层](../../soft_skills/search_anywhere/SKILL.md)。**禁止凭空编方向/选题/文案/SOP。**
 
 ## 何时进入
 用户想"让你来打理/持续运营这个号"，例如：

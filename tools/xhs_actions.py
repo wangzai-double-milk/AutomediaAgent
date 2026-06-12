@@ -118,12 +118,16 @@ def _wait_initial_state(timeout=8.0):
     return False
 
 
-def _feed_detail_url(feed_id, xsec_token):
-    return f"https://www.xiaohongshu.com/explore/{feed_id}?xsec_token={xsec_token}&xsec_source=pc_feed"
+def _feed_detail_url(feed_id, xsec_token, xsec_source='pc_feed'):
+    # xsec_source 必须与 xsec_token 的来源页一致：搜索结果页 token 配 pc_search，
+    # 首页推荐流 token 配 pc_feed。写死会导致 token/source 错配被风控（error_code=300031）。
+    src = xsec_source or 'pc_feed'
+    return f"https://www.xiaohongshu.com/explore/{feed_id}?xsec_token={xsec_token}&xsec_source={src}"
 
 
-def _user_profile_url(user_id, xsec_token):
-    return f"https://www.xiaohongshu.com/user/profile/{user_id}?xsec_token={xsec_token}&xsec_source=pc_note"
+def _user_profile_url(user_id, xsec_token, xsec_source='pc_note'):
+    src = xsec_source or 'pc_note'
+    return f"https://www.xiaohongshu.com/user/profile/{user_id}?xsec_token={xsec_token}&xsec_source={src}"
 
 
 def _search_url(keyword):
@@ -179,7 +183,7 @@ def list_feeds():
     })()
     """
     data = _exec_json(js)
-    feeds = _simplify_feeds(data)
+    feeds = _simplify_feeds(data, xsec_source='pc_feed')
     return {'ok': bool(feeds), 'count': len(feeds), 'feeds': feeds}
 
 
@@ -210,7 +214,7 @@ def search_feeds(keyword, filters=None):
     })()
     """
     data = _exec_json(js)
-    feeds = _simplify_feeds(data)
+    feeds = _simplify_feeds(data, xsec_source='pc_search')
     return {'ok': bool(feeds), 'count': len(feeds), 'keyword': keyword,
             'filters_applied': applied, 'feeds': feeds}
 
@@ -249,12 +253,13 @@ def _apply_search_filters(filters):
     return applied
 
 
-def get_feed_detail(feed_id, xsec_token, load_comments=True, max_scrolls=8):
+def get_feed_detail(feed_id, xsec_token, load_comments=True, max_scrolls=8, xsec_source='pc_feed'):
     """笔记详情 + 评论：读 __INITIAL_STATE__.note.noteDetailMap[feed_id]。
-    load_comments=True 时滚动评论区加载更多（懒加载）。"""
+    load_comments=True 时滚动评论区加载更多（懒加载）。
+    xsec_source 须与 token 来源一致（搜索结果→pc_search，首页流→pc_feed），错配会被风控。"""
     if not feed_id or not xsec_token:
         return {'ok': False, 'reason': 'feed_id / xsec_token 必填'}
-    _navigate(_feed_detail_url(feed_id, xsec_token), wait=2.0)
+    _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
     if not _wait_initial_state():
         return {'ok': False, 'reason': 'no_initial_state'}
 
@@ -285,11 +290,12 @@ def get_feed_detail(feed_id, xsec_token, load_comments=True, max_scrolls=8):
             'comment_count': len(comments)}
 
 
-def user_profile(user_id, xsec_token):
-    """用户主页：读 __INITIAL_STATE__.user.userPageData + user.notes。"""
+def user_profile(user_id, xsec_token, xsec_source='pc_note'):
+    """用户主页：读 __INITIAL_STATE__.user.userPageData + user.notes。
+    xsec_source 须与 token 来源一致（来自笔记/搜索结果），错配会被风控。"""
     if not user_id or not xsec_token:
         return {'ok': False, 'reason': 'user_id / xsec_token 必填'}
-    _navigate(_user_profile_url(user_id, xsec_token), wait=2.0)
+    _navigate(_user_profile_url(user_id, xsec_token, xsec_source), wait=2.0)
     if not _wait_initial_state():
         return {'ok': False, 'reason': 'no_initial_state'}
     js = r"""
@@ -362,22 +368,24 @@ def _wait_selector(sel, timeout=6.0):
     return False
 
 
-def like_feed(feed_id, xsec_token, unlike=False):
+def like_feed(feed_id, xsec_token, unlike=False, xsec_source='pc_feed'):
     """点赞/取消点赞。先读状态，已是目标态则跳过；点击后校验。"""
     return _toggle_interact(feed_id, xsec_token, target=not unlike,
-                            selector=SELECTORS['like_button'], kind='like')
+                            selector=SELECTORS['like_button'], kind='like',
+                            xsec_source=xsec_source)
 
 
-def favorite_feed(feed_id, xsec_token, unfavorite=False):
+def favorite_feed(feed_id, xsec_token, unfavorite=False, xsec_source='pc_feed'):
     """收藏/取消收藏。"""
     return _toggle_interact(feed_id, xsec_token, target=not unfavorite,
-                            selector=SELECTORS['collect_button'], kind='collect')
+                            selector=SELECTORS['collect_button'], kind='collect',
+                            xsec_source=xsec_source)
 
 
-def _toggle_interact(feed_id, xsec_token, target, selector, kind):
+def _toggle_interact(feed_id, xsec_token, target, selector, kind, xsec_source='pc_feed'):
     if not feed_id or not xsec_token:
         return {'ok': False, 'reason': 'feed_id / xsec_token 必填'}
-    _navigate(_feed_detail_url(feed_id, xsec_token), wait=2.0)
+    _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
     if not _wait_initial_state():
         return {'ok': False, 'reason': 'no_initial_state'}
     block = _check_accessible()
@@ -410,11 +418,11 @@ def _toggle_interact(feed_id, xsec_token, target, selector, kind):
             'verified': bool(new == target)}
 
 
-def post_comment(feed_id, xsec_token, content):
+def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
     """发表评论：点输入框 → 输入 → 点提交。"""
     if not (feed_id and xsec_token and content):
         return {'ok': False, 'reason': 'feed_id / xsec_token / content 必填'}
-    _navigate(_feed_detail_url(feed_id, xsec_token), wait=2.0)
+    _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
     block = _check_accessible()
     if block:
         return {'ok': False, 'reason': block, 'blocked': True}
@@ -437,13 +445,13 @@ def post_comment(feed_id, xsec_token, content):
     return {'ok': True, 'selector_hit': True, 'feed_id': feed_id}
 
 
-def reply_comment(feed_id, xsec_token, content, comment_id='', user_id=''):
+def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_source='pc_feed'):
     """回复指定评论：滚动找到目标评论 → 点回复 → 输入 → 提交。"""
     if not (feed_id and xsec_token and content):
         return {'ok': False, 'reason': 'feed_id / xsec_token / content 必填'}
     if not (comment_id or user_id):
         return {'ok': False, 'reason': 'comment_id 或 user_id 至少一个'}
-    _navigate(_feed_detail_url(feed_id, xsec_token), wait=2.0)
+    _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
     block = _check_accessible()
     if block:
         return {'ok': False, 'reason': block, 'blocked': True}
@@ -589,17 +597,19 @@ def _check_accessible():
 
 
 # ───────────────────────── 数据精简（省 token） ─────────────────────────
-def _simplify_feeds(data):
-    """feeds 原始结构可能是 list 或 {_value:[...]}。统一成精简 list。"""
+def _simplify_feeds(data, xsec_source=''):
+    """feeds 原始结构可能是 list 或 {_value:[...]}。统一成精简 list。
+    xsec_source 标记这批 token 的来源页（list_feeds→pc_feed，search_feeds→pc_search），
+    随每条一起返回，供后续 get_feed_detail 等绑定使用，避免 token/source 错配被风控。"""
     items = data
     if isinstance(data, dict):
         items = data.get('_value') or data.get('value') or []
     if not isinstance(items, list):
         return []
-    return [_simplify_one_feed(f) for f in items if isinstance(f, dict)]
+    return [_simplify_one_feed(f, xsec_source) for f in items if isinstance(f, dict)]
 
 
-def _simplify_one_feed(f):
+def _simplify_one_feed(f, xsec_source=''):
     card = f.get('noteCard') or {}
     user = card.get('user') or {}
     inter = card.get('interactInfo') or {}
@@ -607,6 +617,7 @@ def _simplify_one_feed(f):
     return {
         'id': f.get('id', ''),
         'xsec_token': f.get('xsecToken', ''),
+        'xsec_source': xsec_source,
         'type': card.get('type', ''),
         'title': card.get('displayTitle', ''),
         'author': user.get('nickName') or user.get('nickname', ''),
