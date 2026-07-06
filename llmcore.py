@@ -35,16 +35,27 @@ def __getattr__(name):  # once guard in PEP 562
     if name == 'mykeys': return reload_mykeys()[0]
     raise AttributeError(f"module 'llmcore' has no attribute {name}")
 
-def compress_history_tags(messages, keep_recent=10, max_len=800, force=False, interval=5):
-    """Compress <thinking>/<tool_use>/<tool_result> tags in older messages to save tokens."""
+# 技能文档在上下文压缩中受保护：被 <skill_doc>..</skill_doc> 包裹的内容整体不做截断。
+SKILL_DOC_OPEN = '<skill_doc>'
+SKILL_DOC_CLOSE = '</skill_doc>'
+# 模型输出默认上限：至少 16K，避免"卡输出"/过早断。config 里显式配 max_tokens 时以配置为准。
+DEFAULT_MAX_OUTPUT_TOKENS = 16384
+
+def compress_history_tags(messages, keep_recent=10, max_len=16000, force=False, interval=5):
+    """Compress <thinking>/<tool_use>/<tool_result> tags in older messages to save tokens.
+    16K 以下的段落不压缩；被 <skill_doc> 包裹的技能文档整体豁免。"""
     compress_history_tags._cd = getattr(compress_history_tags, '_cd', 0) + 1
     if force: compress_history_tags._cd = 0
     if compress_history_tags._cd % interval != 0: return messages
     _before = sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
     _pats = {tag: re.compile(rf'(<{tag}>)([\s\S]*?)(</{tag}>)') for tag in ('thinking', 'think', 'tool_use', 'tool_result')}
     _hist_pat = re.compile(r'<(history|key_info|earlier_context)>[\s\S]*?</\1>')
-    def _trunc_str(s): return s[:max_len//2] + '\n...[Truncated]...\n' + s[-max_len//2:] if isinstance(s, str) and len(s) > max_len else s
+    def _trunc_str(s):
+        if not isinstance(s, str) or len(s) <= max_len: return s
+        if SKILL_DOC_OPEN in s: return s  # 技能文档整体不压缩
+        return s[:max_len//2] + '\n...[Truncated]...\n' + s[-max_len//2:]
     def _trunc(text):
+        if isinstance(text, str) and SKILL_DOC_OPEN in text: return text  # 技能文档整体不压缩
         text = _hist_pat.sub(lambda m: f'<{m.group(1)}>[...]</{m.group(1)}>', text)
         for pat in _pats.values(): text = pat.sub(lambda m: m.group(1) + _trunc_str(m.group(2)) + m.group(3), text)
         return text
@@ -92,6 +103,22 @@ def safeprint(*argv):
     except OSError: pass
 print = safeprint
 
+def _msg_has_skill_doc(msg):
+    """判断一条 history 消息里是否含受保护的技能文档（<skill_doc>），用于裁剪时永久保留。"""
+    def _hit(x): return isinstance(x, str) and SKILL_DOC_OPEN in x
+    c = msg.get('content')
+    if _hit(c): return True
+    if isinstance(c, list):
+        for b in c:
+            if not isinstance(b, dict): continue
+            if _hit(b.get('text')): return True
+            tc = b.get('content')
+            if _hit(tc): return True
+            if isinstance(tc, list):
+                for sub in tc:
+                    if isinstance(sub, dict) and _hit(sub.get('text')): return True
+    return False
+
 def trim_messages_history(history, sess):
     cap = sess.context_win * 3
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
@@ -102,8 +129,11 @@ def trim_messages_history(history, sess):
     compress_history_tags(history, keep_recent=4, force=True)
     if cost() <= target: return
     while len(history) > 9 and cost() > target:
-        history.pop(0)
-        while history and history[0].get('role') != 'user': history.pop(0)
+        # 从最旧的消息开始删；但含技能文档(<skill_doc>)的消息永久保留，绝不删除。
+        victim = next((i for i, m in enumerate(history) if not _msg_has_skill_doc(m)), None)
+        if victim is None: break  # 剩下的全是受保护技能文档，停止裁剪
+        history.pop(victim)
+        while history and history[0].get('role') != 'user' and not _msg_has_skill_doc(history[0]): history.pop(0)
         if history and history[0].get('role') == 'user': history[0] = _sanitize_leading_user_msg(history[0])
     print(f'[Debug] Trimmed context, current: {cost()} chars, {len(history)} messages.')
 
@@ -544,7 +574,7 @@ class BaseSession:
         mode = str(cfg.get('api_mode', 'chat_completions')).strip().lower().replace('-', '_')
         self.api_mode = 'responses' if mode in ('responses', 'response') else 'chat_completions'
         self.temperature = cfg.get('temperature', 1)
-        self.max_tokens = cfg.get('max_tokens')
+        self.max_tokens = cfg.get('max_tokens') or DEFAULT_MAX_OUTPUT_TOKENS
     def _apply_claude_thinking(self, payload):
         if self.thinking_type:
             thinking = {"type": self.thinking_type}
@@ -597,7 +627,7 @@ def _ensure_thinking_blocks(messages, model):
 class ClaudeSession(BaseSession):
     def raw_ask(self, messages):
         messages = _fix_messages(messages)
-        if self.max_tokens is None: self.max_tokens = 8192
+        if self.max_tokens is None: self.max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
         headers = {"x-api-key": self.api_key, "Content-Type": "application/json", "anthropic-version": "2023-06-01", "anthropic-beta": "prompt-caching-2024-07-31"}
         payload = {"model": self.model, "messages": messages, "max_tokens": self.max_tokens, "stream": self.stream}
         if self.temperature != 1: payload["temperature"] = self.temperature
@@ -646,7 +676,7 @@ class NativeClaudeSession(BaseSession):
         self._device_id = uuid.uuid4().hex + uuid.uuid4().hex[:32]
         self.tools = None
     def raw_ask(self, messages):
-        if self.max_tokens is None: self.max_tokens = 8192
+        if self.max_tokens is None: self.max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
         model = self.model
         messages = _fix_messages(messages)
         if 'claude' in model.lower(): messages = _drop_unsigned_thinking(messages)
@@ -888,8 +918,18 @@ def _write_llm_log(label, content, log_path=None):
         log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f'temp/model_responses/model_responses_{os.getpid()}.txt')
     os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    block = f"=== {label} === {ts}\n{content}\n\n"
     with open(log_path, 'a', encoding='utf-8', errors='replace') as f:
-        f.write(f"=== {label} === {ts}\n{content}\n\n")
+        f.write(block)
+    # 同时把模型调用 tee 进当前任务目录，和 trace.log 并排，方便按任务排查模型痕迹。
+    try:
+        from tools import task as _task
+        tdir = _task.get_current()
+        if tdir and os.path.isdir(tdir):
+            with open(os.path.join(tdir, 'llm_calls.log'), 'a', encoding='utf-8', errors='replace') as f:
+                f.write(block)
+    except Exception:
+        pass  # tee 失败绝不影响主日志与主流程
 
 def tryparse(json_str):
     try: return json.loads(json_str)

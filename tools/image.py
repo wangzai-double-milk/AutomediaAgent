@@ -13,12 +13,16 @@ import os
 import sys
 import json
 import time
+import re
 import base64
 import logging
 import mimetypes
 import urllib.request
 import urllib.error
+import urllib.parse
 import subprocess
+import tempfile
+import uuid as uuid_mod
 
 # 让 import mykey 不依赖 cwd
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,6 +71,23 @@ GEN_MODEL = _MODELS.get('gen', 'doubao-seedream-4-5-251128')    # 生图（t2i�
 CHAT_URL = API_BASE + '/chat/completions'
 RESPONSES_URL = API_BASE + '/responses'
 IMAGES_URL = API_BASE + '/images/generations'
+FILES_URL = API_BASE + '/files'
+
+# 长视频理解：通过 Files API 上传整段视频（最大 512MB），由模型按 fps 抽帧理解全片，
+# 而不是本地压缩成关键帧。fps 越低、token 越省；默认 1.0，长视频可降到 0.3。
+# 想调采样率只改 mykey.video_sample_fps 即可。
+VIDEO_SAMPLE_FPS = float(getattr(mykey, 'video_sample_fps', 1.0))
+
+# 火山 Files API 单文件上限 512MB。4K/长片很容易贴近或超过该上限，
+# 超过时先用 moviepy（底层走 imageio-ffmpeg 自带二进制，无需系统装 ffmpeg）压成审查代理，
+# 只降传输/审查体积，不改动创作原片；代理用完即删。
+_ARK_FILES_MAX_BYTES = 512 * 1024 * 1024
+# 代理目标体积：压到 480MB 以内，给网关/元数据留裕量。
+_VLM_PROXY_TARGET_BYTES = int(getattr(mykey, 'vlm_proxy_target_bytes', 480 * 1024 * 1024))
+# 视频原生理解（推理模型）单次推理常 >180s，长片/4K 整片更久，给足超时。
+VIDEO_UNDERSTAND_TIMEOUT = int(getattr(mykey, 'video_understand_timeout', 1800))
+# 视频审查输出上限：尽量拉大，避免长视频逐镜头审查被中途截断。可用 mykey 覆盖。
+VLM_MAX_OUTPUT_TOKENS = int(getattr(mykey, 'vlm_max_output_tokens', 32768))
 
 OUTPUT_DIR = os.path.join(_PROJECT_ROOT, 'temp', 'image_review')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -156,8 +177,12 @@ def _build_responses_input(sys_prompt: str, user_text: str, images: list = None,
             
     # 添加视频
     if videos:
-        for vid_url in videos:
-            content.append({"type": "input_video", "video_url": vid_url})
+        for vid in videos:
+            # 通过 Files API 上传后拿到的 file_id（推荐：整段长视频理解），形如 "file-2025..."
+            if isinstance(vid, str) and vid.startswith('file-'):
+                content.append({"type": "input_video", "file_id": vid})
+            else:
+                content.append({"type": "input_video", "video_url": vid})
             
     # 只有 user 角色，system prompt 也是作为 input_text 放在前面（或者通过 instructions 传，这里直接放前面）
     if sys_prompt:
@@ -189,6 +214,243 @@ def image_to_url(path_or_url: str) -> str:
 def _download(url: str, save_path: str) -> str:
     urllib.request.urlretrieve(url, save_path)
     return save_path
+
+
+def _video_request(url: str, method: str = 'GET'):
+    headers = {
+        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) '
+                       'Chrome/126.0.0.0 Safari/537.36'),
+        'Accept': '*/*',
+        'Referer': 'https://www.douyin.com/',
+    }
+    return urllib.request.Request(url, headers=headers, method=method)
+
+
+def _is_video_page_url(url: str) -> bool:
+    try:
+        p = urllib.parse.urlparse(url)
+        host = p.netloc.lower()
+        return ('douyin.com' in host and '/video/' in p.path) or ('iesdouyin.com/share/video' in url)
+    except Exception:
+        return False
+
+
+def _is_direct_video_url(url: str) -> bool:
+    if not isinstance(url, str):
+        return False
+    u = url.lower()
+    if u.startswith('blob:'):
+        return False
+    if any(x in u for x in ('douyin_pc_client', 'download/douyin_pc', 'static.bytednsdoc.com/obj/eden-cn', '.exe')):
+        return False
+    if any(x in u for x in ('.mp4', '.m3u8', 'douyinvod.com', '/video/tos/')):
+        return True
+    return False
+
+
+def _normalize_video_candidate(s: str) -> str:
+    if not s:
+        return ''
+    s = str(s).strip().strip('"\'')
+    # 页面 JSON 里常见 https:\/\/...、\\u002F、百分号编码混用。
+    s = s.replace('\\u002F', '/').replace('\\/', '/').replace('&amp;', '&')
+    for _ in range(3):
+        try:
+            ns = urllib.parse.unquote(s)
+        except Exception:
+            break
+        if ns == s:
+            break
+        s = ns
+    return s
+
+
+def _extract_video_candidates(text: str) -> list:
+    if not text:
+        return []
+    raw = text
+    # 先把常见转义展开一次，避免正则截不到。
+    expanded = raw.replace('\\u002F', '/').replace('\\/', '/').replace('&amp;', '&')
+    candidates = []
+    patterns = [
+        r'https?://[^"\'<>\s\\]+(?:douyinvod\.com|/video/tos/|\.mp4|\.m3u8)[^"\'<>\s\\]*',
+        r'https?:\\?/\\?/[^"\'<>\s]+(?:douyinvod\.com|/video/tos/|\.mp4|\.m3u8)[^"\'<>\s]*',
+    ]
+    for body in (raw, expanded):
+        for pat in patterns:
+            for m in re.finditer(pat, body, flags=re.I):
+                u = _normalize_video_candidate(m.group(0))
+                if _is_direct_video_url(u):
+                    candidates.append(u)
+
+    seen = set()
+    uniq = []
+    for u in candidates:
+        if u in seen:
+            continue
+        seen.add(u)
+        uniq.append(u)
+
+    def score(u):
+        lu = u.lower()
+        s = 0
+        if 'douyinvod.com' in lu:
+            s += 100
+        if 'static.bytednsdoc.com' in lu or 'douyin_pc_client' in lu:
+            s -= 200
+        if '.mp4' in lu or 'mime_type=video_mp4' in lu:
+            s += 50
+        if '.m3u8' in lu:
+            s += 30
+        if 'playwm' in lu:
+            s -= 10
+        if any(x in lu for x in ('.webp', '.jpeg', '.jpg', '.png')):
+            s -= 100
+        return s
+
+    return sorted(uniq, key=score, reverse=True)
+
+
+def resolve_video_page_url(video_url: str) -> str:
+    """把抖音等页面 URL 解析成真实 video/* URL。
+    成功返回真实流地址；无法解析时返回原 URL，让调用方决定是否报错/降级。
+    """
+    if not isinstance(video_url, str) or not video_url.startswith(('http://', 'https://')):
+        return video_url
+    if _is_direct_video_url(video_url):
+        return video_url
+    if not _is_video_page_url(video_url):
+        return video_url
+
+    try:
+        log.info('尝试从视频页面解析真实视频流: %s', video_url)
+        html = urllib.request.urlopen(_video_request(video_url), timeout=30).read().decode('utf-8', errors='replace')
+        cands = _extract_video_candidates(html)
+        if cands:
+            log.info('从视频页面解析到真实视频流: %s', cands[0][:120])
+            return cands[0]
+        log.warning('视频页面未解析到真实视频流: %s', video_url)
+    except Exception as e:
+        log.warning('解析视频页面失败: %s -> %s', video_url, e)
+    return video_url
+
+
+def download_video_to_temp(video_url: str, suffix: str = '.mp4', max_bytes: int = 512 * 1024 * 1024) -> str:
+    """把真实视频 URL 下载到本地临时文件，调用方负责删除。"""
+    fd, path = tempfile.mkstemp(prefix='media_', suffix=suffix, dir=OUTPUT_DIR)
+    os.close(fd)
+    total = 0
+    try:
+        with urllib.request.urlopen(_video_request(video_url), timeout=120) as resp, open(path, 'wb') as f:
+            ct = (resp.headers.get('Content-Type') or '').lower()
+            if 'text/html' in ct:
+                raise RuntimeError(f'下载到 HTML 而不是视频: content-type={ct}')
+            while True:
+                chunk = resp.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise RuntimeError(f'视频超过下载上限 {max_bytes} bytes')
+                f.write(chunk)
+        if total <= 0:
+            raise RuntimeError('下载视频为空')
+        log.info('已下载视频到临时文件: %s (%.1fMB)', path, total / 1024 / 1024)
+        return path
+    except Exception:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        raise
+
+
+def _mb(n) -> float:
+    return n / (1024 * 1024)
+
+
+def prepare_video_for_vlm(video: str, target_bytes: int = None,
+                          files_max_bytes: int = None) -> dict:
+    """本地视频超过 Files API 上限时，用 moviepy 压成"审查代理"文件再上传。
+
+    - 只做传输/审查体积压缩（降分辨率+码率），不动创作原片；
+    - moviepy 底层用 imageio-ffmpeg 自带的静态 ffmpeg 二进制，无需系统装 ffmpeg；
+    - 多档降级 1080p→720p→540p，直到压到 target_bytes 以内；
+    - 返回 {'path', 'prepared', 'reason', ...}，代理路径由调用方负责用完删除。
+    远程 URL / 不存在 / 未超限：原样返回 prepared=False。
+    """
+    if target_bytes is None:
+        target_bytes = _VLM_PROXY_TARGET_BYTES
+    if files_max_bytes is None:
+        files_max_bytes = _ARK_FILES_MAX_BYTES
+    if not isinstance(video, str) or video.startswith(('http://', 'https://')):
+        return {'path': video, 'prepared': False, 'reason': 'remote_url'}
+    src = os.path.expanduser(video)
+    if not os.path.exists(src):
+        return {'path': video, 'prepared': False, 'reason': 'missing_local_file'}
+    size = os.path.getsize(src)
+    if size <= files_max_bytes:
+        return {'path': src, 'prepared': False, 'reason': 'within_files_api_limit',
+                'source_size_mb': round(_mb(size), 1)}
+
+    try:
+        # moviepy 2.x 从顶层导入且方法名为 resized()；1.x 从 moviepy.editor 导入且为 resize()。
+        try:
+            from moviepy import VideoFileClip  # 2.x
+        except Exception:
+            from moviepy.editor import VideoFileClip  # 1.x
+    except Exception as e:
+        raise RuntimeError(
+            f'视频 {_mb(size):.0f}MB 超过 Files API 上限 {_mb(files_max_bytes):.0f}MB，'
+            f'需要 moviepy 压缩代理，但导入 moviepy 失败: {e}。请 pip install moviepy。')
+
+    def _resize_clip(clip, height):
+        if clip.h <= height:
+            return clip
+        fn = getattr(clip, 'resized', None) or getattr(clip, 'resize', None)  # 2.x / 1.x
+        return fn(height=height)
+
+    stem, _ = os.path.splitext(os.path.basename(src))
+    out = os.path.join(OUTPUT_DIR, f'{stem}_vlm_review_{uuid_mod.uuid4().hex[:8]}.mp4')
+    last_err = None
+    for height, bitrate in ((1080, '2000k'), (720, '1200k'), (540, '800k')):
+        clip = None
+        try:
+            log.info('moviepy 压缩审查代理: %s -> 高%s 码率%s', src, height, bitrate)
+            clip = VideoFileClip(src)
+            target_clip = _resize_clip(clip, height)
+            target_clip.write_videofile(
+                out, codec='libx264', audio_codec='aac', bitrate=bitrate,
+                preset='ultrafast', threads=os.cpu_count() or 2,
+                ffmpeg_params=['-movflags', '+faststart'],
+                logger=None,
+            )
+            proxy_size = os.path.getsize(out)
+            if proxy_size <= target_bytes:
+                log.info('审查代理已生成: %s (%.1fMB, 高%s)', out, _mb(proxy_size), height)
+                return {'path': out, 'prepared': True, 'reason': 'compressed',
+                        'source_path': src, 'source_size_mb': round(_mb(size), 1),
+                        'proxy_size_mb': round(_mb(proxy_size), 1), 'height': height}
+            last_err = RuntimeError(
+                f'代理仍过大 {_mb(proxy_size):.1f}MB > {_mb(target_bytes):.1f}MB，降档重试')
+            log.warning('%s', last_err)
+        except Exception as e:
+            last_err = e
+            log.warning('moviepy 压缩(高%s)失败: %s', height, e)
+        finally:
+            if clip is not None:
+                try:
+                    clip.close()
+                except Exception:
+                    pass
+    try:
+        if os.path.exists(out):
+            os.remove(out)
+    except Exception:
+        pass
+    raise RuntimeError(f'prepare_video_for_vlm 压缩失败 source={src} '
+                       f'size={_mb(size):.1f}MB last_error={last_err}')
 
 
 def _strip_md_fence(s: str) -> str:
@@ -399,85 +661,224 @@ def extract_text_from_image(image: str) -> str:
 # ⑥ 通用 VLM 图像分析 (vlm_analyze_image)
 # ─────────────────────────────────────────────────────────────────
 import typing
-def _compress_video(video_url: str) -> str:
-    """下载并使用 moviepy 压缩视频（降低分辨率和码率，以满足 50MB 限制）
-    返回压缩后视频的本地绝对路径。如果压缩失败，返回原 URL 或抛出异常。
+
+
+def _http_post_multipart(url: str, fields: dict, file_field: str = None,
+                         file_path: str = None, timeout: int = 600) -> dict:
+    """以 multipart/form-data 上传（Files API 用）。
+    fields: 普通表单字段（含 'preprocess_configs[video][fps]' 这类带方括号的 key）。
+    file_field/file_path: 若提供则附带一个二进制文件。
+    不依赖第三方库，手工拼 multipart body。
     """
-    import uuid
-    try:
-        from moviepy.editor import VideoFileClip
-    except ImportError:
-        log.error('请先运行 `pip install moviepy` 安装依赖！')
-        return video_url
+    boundary = '----arkboundary' + uuid_mod.uuid4().hex
+    crlf = b'\r\n'
+    body = bytearray()
+    for k, v in fields.items():
+        body += b'--' + boundary.encode() + crlf
+        body += f'Content-Disposition: form-data; name="{k}"'.encode() + crlf + crlf
+        body += str(v).encode('utf-8') + crlf
+    if file_field and file_path:
+        fname = os.path.basename(file_path)
+        mime = mimetypes.guess_type(fname)[0] or 'application/octet-stream'
+        body += b'--' + boundary.encode() + crlf
+        body += f'Content-Disposition: form-data; name="{file_field}"; filename="{fname}"'.encode() + crlf
+        body += f'Content-Type: {mime}'.encode() + crlf + crlf
+        with open(file_path, 'rb') as f:
+            body += f.read()
+        body += crlf
+    body += b'--' + boundary.encode() + b'--' + crlf
 
-    tmp_dir = os.path.join(OUTPUT_DIR, 'video_tmp')
-    os.makedirs(tmp_dir, exist_ok=True)
-    
-    unique_id = uuid.uuid4().hex[:8]
-    raw_path = os.path.join(tmp_dir, f'raw_{unique_id}.mp4')
-    out_path = os.path.join(tmp_dir, f'comp_{unique_id}.mp4')
-    
-    log.info('视频过大，开始下载进行压缩: %s...', video_url[:60])
+    log.info('POST(multipart) %s fields=%s file=%s', url, list(fields.keys()), file_path or '-')
+    _t0 = time.time()
+    req = urllib.request.Request(
+        url, data=bytes(body),
+        headers={
+            'Authorization': f'Bearer {API_KEY}',
+            'Content-Type': f'multipart/form-data; boundary={boundary}',
+        },
+        method='POST',
+    )
     try:
-        urllib.request.urlretrieve(video_url, raw_path)
+        resp = urllib.request.urlopen(req, timeout=timeout).read().decode('utf-8')
+    except urllib.error.HTTPError as e:
+        b = e.read().decode('utf-8', errors='replace')
+        log.error('POST(multipart) %s 失败 HTTP %s (%.1fs): %s', url, e.code, time.time() - _t0, b[:500])
+        raise RuntimeError(f'HTTP {e.code} @ {url}: {b}')
+    log.info('POST(multipart) %s 成功 (%.1fs)', url, time.time() - _t0)
+    return json.loads(resp)
+
+
+def _http_get_json(url: str, timeout: int = 60) -> dict:
+    req = urllib.request.Request(
+        url, headers={'Authorization': f'Bearer {API_KEY}'}, method='GET')
+    resp = urllib.request.urlopen(req, timeout=timeout).read().decode('utf-8')
+    return json.loads(resp)
+
+
+def delete_uploaded_file(file_id: str) -> bool:
+    """删除 Files API 上传的文件，释放托管空间（总容量有上限，用完即删）。
+    失败只告警不抛错（文件默认 7 天也会自动过期）。"""
+    if not file_id or not str(file_id).startswith('file-'):
+        return False
+    try:
+        req = urllib.request.Request(
+            f'{FILES_URL}/{file_id}',
+            headers={'Authorization': f'Bearer {API_KEY}'}, method='DELETE')
+        urllib.request.urlopen(req, timeout=30).read()
+        log.info('已删除 Files API 文件，释放托管空间: %s', file_id)
+        return True
     except Exception as e:
-        log.error('下载视频失败: %s', e)
-        return video_url
+        log.warning('删除 Files API 文件失败(忽略，将随 7 天到期自动清理): %s -> %s', file_id, e)
+        return False
 
-    # 使用 moviepy 压缩视频：限制为 720p，帧率 15，码率 500k
-    try:
-        clip = VideoFileClip(raw_path)
-        
-        # 如果视频高于 720p，按比例缩小
-        if clip.h > 720:
-            clip = clip.resize(height=720)
-            
-        log.info('正在使用 moviepy 压缩视频...')
-        # 写入文件，设定参数降低体积
-        clip.write_videofile(
-            out_path, 
-            fps=15, 
-            codec="libx264", 
-            audio_codec="aac", 
-            bitrate="500k", 
-            audio_bitrate="64k",
-            logger=None # 隐藏进度条
-        )
-        clip.close()
-        log.info('视频压缩完成: %s', out_path)
-        return out_path
-    except Exception as e:
-        log.error('moviepy 压缩视频失败: %s', e)
-        return raw_path
 
-    # 清理下载的原始视频（保留压缩后的）
-    try:
-        os.remove(raw_path)
-    except:
-        pass
+def upload_video_for_understanding(video: str, fps: float = None,
+                                   wait_active: bool = True, poll_timeout: int = 1200) -> str:
+    """把整段视频交给 Files API（最大 512MB），返回可在 Responses API 引用的 File ID。
+    - video: 本地路径 或 公网 http(s) URL。
+    - fps: 抽帧采样率（越低越省 token），默认取 VIDEO_SAMPLE_FPS(1.0)，长视频建议 0.3。
+    - 本地文件超过 512MB 时，先用 moviepy 压成审查代理再上传（代理上传后即删）。
+    - 上传后文件需异步预处理；wait_active=True 时轮询直到 status=active 再返回。
+    返回 file_id 字符串；失败抛 RuntimeError。
+    """
+    if fps is None:
+        fps = VIDEO_SAMPLE_FPS
+    fields = {
+        'purpose': 'user_data',
+        'preprocess_configs[video][fps]': fps,
+    }
+    is_url = isinstance(video, str) and video.startswith(('http://', 'https://'))
+    proxy_to_cleanup = None
+    if is_url:
+        fields['url'] = video
+        log.info('Files API 上传视频(URL方式) fps=%s: %s', fps, video[:80])
+        data = _http_post_multipart(FILES_URL, fields, timeout=VIDEO_UNDERSTAND_TIMEOUT)
+    else:
+        path = os.path.expanduser(video)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'视频不存在: {path}')
+        # 超过 Files API 512MB 上限 → 先压缩成审查代理再上传
+        prep = prepare_video_for_vlm(path)
+        if prep.get('prepared'):
+            proxy_to_cleanup = prep['path']
+            path = prep['path']
+            log.info('本地视频超上限，改用压缩代理上传: %s (%.1fMB)', path, prep.get('proxy_size_mb', -1))
+        try:
+            log.info('Files API 上传视频(本地文件) fps=%s: %s', fps, path)
+            data = _http_post_multipart(FILES_URL, fields, file_field='file',
+                                        file_path=path, timeout=VIDEO_UNDERSTAND_TIMEOUT)
+        finally:
+            # 代理文件已进入上传流，无论成败都清理，避免 temp 膨胀
+            if proxy_to_cleanup:
+                try:
+                    os.remove(proxy_to_cleanup)
+                    log.info('已删除审查代理文件: %s', proxy_to_cleanup)
+                except Exception as e:
+                    log.warning('删除审查代理失败(忽略): %s -> %s', proxy_to_cleanup, e)
 
-    return out_path
+    file_id = data.get('id')
+    if not file_id:
+        raise RuntimeError(f'Files API 上传未返回 file id: {json.dumps(data, ensure_ascii=False)[:300]}')
+    status = data.get('status', '')
+    log.info('Files API 上传完成 file_id=%s status=%s', file_id, status)
+
+    if wait_active and status not in ('active', ''):
+        _t0 = time.time()
+        while time.time() - _t0 < poll_timeout:
+            time.sleep(3)
+            try:
+                info = _http_get_json(f'{FILES_URL}/{file_id}')
+            except Exception as e:
+                log.warning('轮询文件状态失败(忽略继续): %s', e)
+                continue
+            status = info.get('status', '')
+            log.info('Files API 文件 %s 状态=%s (%.0fs)', file_id, status, time.time() - _t0)
+            if status == 'active':
+                break
+            if status in ('failed', 'error', 'expired'):
+                raise RuntimeError(f'Files API 文件预处理失败 status={status}: '
+                                   f'{json.dumps(info, ensure_ascii=False)[:300]}')
+        else:
+            raise RuntimeError(f'Files API 文件 {file_id} 在 {poll_timeout}s 内未变 active(当前 {status})')
+    return file_id
 
 
 def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
-    """通用图片分析：将一张或多张图片和自定义 Prompt 喂给 VLM，返回分析结果。"""
+    """通用图片/视频分析：将一张或多张图片、视频和自定义 Prompt 喂给 VLM，返回分析结果。
+    视频走 Files API 上传整段（最大 512MB，按 VIDEO_SAMPLE_FPS 抽帧理解全片），
+    而非只看几张关键帧——这样模型能真正"看完整段视频"。
+    """
     if isinstance(images, str):
         images = [images]
-        
+
     imgs_list = []
-    vids_list = []
+    raw_vids = []
     for media in images:
         if not media or media.startswith('<skip'):
             continue
         try:
-            # 判断是否是视频
-            if media.endswith('.mp4') or media.endswith('.m3u8') or 'video' in media:
-                vids_list.append(media) # 先传 URL，如果报错拦截再转为 data URI 压缩
+            # 判断是否是视频（已是 file_id 的直接当视频引用）
+            if (isinstance(media, str) and media.startswith('file-')) \
+                    or media.endswith('.mp4') or media.endswith('.m3u8') or 'video' in media:
+                raw_vids.append(media)
             else:
-                image_url = image_to_url(media)
-                imgs_list.append(image_url)
+                imgs_list.append(image_to_url(media))
         except Exception as e:
             log.warning('analyze_image skipped a media due to: %s', e)
+
+    # 视频：优先用 Files API 上传整段，拿到 file_id 让模型看完整片；
+    # 上传失败则降级为直接传 video_url（受 50MB 限制，仅兜底）。
+    vids_list = []
+    uploaded_here = []  # 本次调用上传的 file_id，用完即删，释放托管空间（总容量有上限）
+    temp_video_files = []  # 本次调用下载的临时视频，用完即删
+    prep_errors = []
+    for v in raw_vids:
+        if isinstance(v, str) and v.startswith('file-'):
+            vids_list.append(v)  # 外部传入的 file_id 不归本函数管，不删
+            continue
+        original_v = v
+        v = resolve_video_page_url(v) if isinstance(v, str) else v
+        if _is_video_page_url(original_v) and v == original_v:
+            prep_errors.append(f'未能从页面 URL 解析真实视频流: {original_v}')
+            log.warning('拒绝把视频页面 HTML URL 当视频传给模型: %s', original_v)
+            continue
+        try:
+            file_id = upload_video_for_understanding(v)
+            vids_list.append(file_id)
+            uploaded_here.append(file_id)
+            log.info('视频已上传 Files API，整段理解 file_id=%s', file_id)
+        except Exception as e:
+            log.warning('Files API 上传视频失败，尝试本地下载后重新上传: %s', e)
+            try:
+                if isinstance(v, str) and v.startswith(('http://', 'https://')) and _is_direct_video_url(v):
+                    suffix = '.m3u8' if '.m3u8' in v.lower() else '.mp4'
+                    local_video = download_video_to_temp(v, suffix=suffix)
+                    temp_video_files.append(local_video)
+                    file_id = upload_video_for_understanding(local_video)
+                    vids_list.append(file_id)
+                    uploaded_here.append(file_id)
+                    log.info('视频下载后已上传 Files API，整段理解 file_id=%s', file_id)
+                    continue
+            except Exception as e2:
+                log.warning('本地下载/上传视频失败: %s', e2)
+
+            # 只有真实视频 URL 才允许最后降级为 video_url 直传；页面 URL 不再降级，避免 text/html 再次报错。
+            if isinstance(v, str) and _is_direct_video_url(v):
+                log.warning('降级为 video_url 直传真实视频流: %s', v[:120])
+                vids_list.append(v)
+            else:
+                prep_errors.append(f'视频预处理失败: {original_v} -> {e}')
+
+    if raw_vids and not vids_list:
+        for p in temp_video_files:
+            try:
+                os.remove(p)
+                log.info('已删除本地临时视频: %s', p)
+            except Exception as e:
+                log.warning('删除本地临时视频失败(忽略): %s -> %s', p, e)
+        return '[Error] 视频预处理失败，未拿到可供模型理解的真实视频流。' + (
+            '\n' + '\n'.join(prep_errors) if prep_errors else ''
+        )
 
     inputs = _build_responses_input(
         sys_prompt="你是一个全模态新媒体运营助手。请仔细阅读用户提供的图片或视频，并按要求回答。",
@@ -488,38 +889,29 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
 
     payload = {
         'model': VLM_MODEL,
-        'input': inputs
+        'input': inputs,
+        'max_output_tokens': VLM_MAX_OUTPUT_TOKENS,
     }
-    
-    # 尝试发送请求，如果报 400 且包含 "exceeds the limit"，进行视频压缩重试
+
+    has_video = bool(vids_list)
+    # 视频整片理解单次推理很慢，给足超时；纯图片走默认超时即可。
+    req_timeout = VIDEO_UNDERSTAND_TIMEOUT if has_video else 180
     try:
-        data = _http_post_json(RESPONSES_URL, payload)
+        data = _http_post_json(RESPONSES_URL, payload, timeout=req_timeout)
     except RuntimeError as e:
-        err_msg = str(e)
-        if 'exceeds the limit' in err_msg and 'video' in err_msg and vids_list:
-            log.warning('视频过大被拦截，开始尝试自动压缩重传...')
-            # 取出第一个视频进行压缩
-            compressed_vid = _compress_video(vids_list[0])
-            if compressed_vid != vids_list[0]:
-                # 重新构造输入
-                try:
-                    comp_url = image_to_url(compressed_vid)
-                    inputs = _build_responses_input(
-                        sys_prompt="你是一个全模态新媒体运营助手。请仔细阅读用户提供的图片或视频，并按要求回答。",
-                        user_text=prompt,
-                        images=imgs_list,
-                        videos=[comp_url]
-                    )
-                    payload['input'] = inputs
-                    log.info('正在使用压缩后的视频重发请求...')
-                    data = _http_post_json(RESPONSES_URL, payload)
-                except Exception as inner_e:
-                    return f"[Error] 压缩后重试依然失败: {inner_e}"
-            else:
-                return f"[Error] 视频过大且无法压缩: {err_msg}"
-        else:
-            return f"[Error] API 请求失败: {err_msg}"
-    
+        return f"[Error] API 请求失败: {e}"
+    finally:
+        # 无论成败，清理本次上传的托管文件，避免占满总容量
+        for fid in uploaded_here:
+            delete_uploaded_file(fid)
+        # 清理本次下载的本地临时视频，避免 temp 膨胀
+        for p in temp_video_files:
+            try:
+                os.remove(p)
+                log.info('已删除本地临时视频: %s', p)
+            except Exception as e:
+                log.warning('删除本地临时视频失败(忽略): %s -> %s', p, e)
+
     try:
         # 使用稳健的提取器（兼容 Responses API 的 reasoning+message 混合 output 结构）
         res_text = _extract_output_text(data)
@@ -527,15 +919,13 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
             res_text = f"[Error] 模型返回空内容，原始返回: {json.dumps(data, ensure_ascii=False)[:500]}"
     except Exception as e:
         res_text = f"[Error] failed to parse response: {e}, raw: {data}"
-        
-    # 清理临时压缩的视频文件
-    try:
-        if 'compressed_vid' in locals() and compressed_vid and os.path.exists(compressed_vid):
-            os.remove(compressed_vid)
-            log.info('已清理临时压缩文件: %s', compressed_vid)
-        # 如果原始下载文件也想一并清理，可以补充逻辑
-    except Exception as e:
-        pass
-        
-    return res_text
 
+    # 输出被长度截断防御：模型未答完就 return，上层可能误当"通过/完整结论"。
+    # 保留已生成的半截，并在最前面显著标注"未完成"，逼上层拆分重问而非采信。
+    if isinstance(data, dict) and data.get('status') == 'incomplete':
+        reason = (data.get('incomplete_details') or {}).get('reason', '')
+        if reason == 'length' and not res_text.startswith('[Error]'):
+            res_text = ('【⚠️未完成·不可作为最终/通过结论】VLM 输出达到长度上限被截断，'
+                        '以下仅为半截结果；请缩小提问范围或分镜/分段拆开重问后再下结论。\n\n' + res_text)
+
+    return res_text

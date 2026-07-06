@@ -815,8 +815,13 @@ class GenericAgentHandler(BaseHandler):
                            count=count, show_linenos=show_linenos)
         if show_linenos and not result.startswith("Error:"): result = '由于设置了show_linenos，以下返回信息为：(行号|)内容 。\n' + result 
         if ' ... [TRUNCATED]' in result: result += '\n\n（某些行被截断，如需完整内容可改用 code_run 读取）'
-        maxlen = 15000 // args.get('_tool_num', 1)
-        result = smart_format(result, max_str_len=maxlen, omit_str='\n\n[omitted long content]\n\n')
+        # 技能/SOP/记忆文档：不做整体截断，并加 <skill_doc> 保护标记，让上下文压缩阶段整体豁免。
+        _is_skill_doc = (not result.startswith("Error:")) and ('skill' in path.lower() or 'sop' in path.lower() or 'memory' in path)
+        if _is_skill_doc:
+            result = f"<skill_doc>\n{result}\n</skill_doc>"
+        else:
+            maxlen = 15000 // args.get('_tool_num', 1)
+            result = smart_format(result, max_str_len=maxlen, omit_str='\n\n[omitted long content]\n\n')
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         log_memory_access(path)
         if 'memory' in path or 'sop' in path or 'skill' in path.lower(): 
@@ -1188,8 +1193,9 @@ class GenericAgentHandler(BaseHandler):
         return StepOutcome(info, next_prompt=next_prompt)
 
 
-    def do_vlm_analyze_post(self, args, response):
-        '''通用 VLM 图文联合分析工具：让大模型结合帖子多张图片、视频、标题和文案进行联合分析。'''
+    def do_analyze_media(self, args, response):
+        '''通用全模态内容理解工具（平台无关）：让大模型真正"看懂"任意图片/视频内容。
+        小红书/抖音/B站/视频号/任意网站通用。视频走 Files API 整段上传理解。'''
         images = args.get('images', [])
         video_url = args.get('video_url', '')
         title = args.get('title', '')
@@ -1207,10 +1213,75 @@ class GenericAgentHandler(BaseHandler):
             
         yield f'[Action] VLM 图文联合分析({media_desc}): {prompt[:50]}...\n'
         task = self._xhs_task()
-        task.append_trace('vlm_analyze_start', {'images': images, 'video_url': video_url, 'prompt': prompt, 'has_title': bool(title), 'has_content': bool(content)})
         
         try:
             xhs_image = self._xhs_import()
+
+            # 如果模型/Agent 传进来的是抖音详情页 URL，而不是真实视频流 URL，
+            # 先从当前浏览器详情页的 <video> / performance / SSR JSON 里抠真实流。
+            # 这能避免把 text/html 页面链接交给 Files API 导致 mimetype=text/html 报错。
+            if isinstance(video_url, str) and 'douyin.com/video/' in video_url and not xhs_image._is_direct_video_url(video_url):
+                extract_js = r"""
+(() => {
+  const out = new Set();
+  const add = (u) => {
+    if (!u || typeof u !== 'string') return;
+    try { u = decodeURIComponent(u); } catch(e) {}
+    u = u.replace(/\\u002F/g, '/').replace(/\\\//g, '/').replace(/&amp;/g, '&');
+    if (u.startsWith('blob:')) return;
+    if (/douyin_pc_client|download\/douyin_pc|static\.bytednsdoc\.com\/obj\/eden-cn|\.exe/i.test(u)) return;
+    if (/douyinvod\.com|\/video\/tos\/|\.mp4|\.m3u8/i.test(u)) out.add(u);
+  };
+  for (const v of document.querySelectorAll('video')) {
+    add(v.currentSrc); add(v.src); add(v.getAttribute('src'));
+    for (const s of v.querySelectorAll('source')) add(s.src || s.getAttribute('src'));
+  }
+  try {
+    for (const e of performance.getEntriesByType('resource')) add(e.name);
+  } catch(e) {}
+  const walk = (o, depth=0, seen=new WeakSet()) => {
+    if (!o || depth > 5) return;
+    if (typeof o === 'string') {
+      add(o);
+      const m = o.match(/https?:\\?\/\\?\/[^"'\s<>]+/g);
+      if (m) m.forEach(add);
+      return;
+    }
+    if (typeof o !== 'object') return;
+    if (seen.has(o)) return; seen.add(o);
+    if (Array.isArray(o)) { o.slice(0, 80).forEach(x => walk(x, depth + 1, seen)); return; }
+    for (const k of Object.keys(o).slice(0, 120)) walk(o[k], depth + 1, seen);
+  };
+  for (const name of ['_ROUTER_DATA', '__INIT_PROPS__', 'RENDER_DATA', '__RENDER_DATA__', '__INITIAL_STATE__']) {
+    try { walk(window[name]); } catch(e) {}
+  }
+  const cands = Array.from(out).sort((a,b) => {
+    const score = (u) => (u.includes('douyinvod.com') ? 100 : 0) + (u.includes('.mp4') ? 50 : 0) + (u.includes('.m3u8') ? 30 : 0) - (u.includes('playwm') ? 10 : 0);
+    return score(b) - score(a);
+  });
+  return JSON.stringify({url: cands[0] || '', candidates: cands.slice(0, 8), page: location.href});
+})()
+"""
+                try:
+                    rr = web_execute_js(extract_js, no_monitor=True)
+                    js_ret = rr.get('js_return') if isinstance(rr, dict) else None
+                    info = json.loads(js_ret) if isinstance(js_ret, str) and js_ret.strip().startswith('{') else {}
+                    resolved = info.get('url') or ''
+                    if resolved and xhs_image._is_direct_video_url(resolved):
+                        task.append_trace('video_url_resolved', {
+                            'from': video_url, 'to': resolved, 'via': 'browser_js',
+                            'candidates': info.get('candidates', [])[:5],
+                        })
+                        video_url = resolved
+                    else:
+                        task.append_trace('video_url_resolve_failed', {
+                            'from': video_url, 'via': 'browser_js',
+                            'result': info or self._js_ret(rr),
+                        })
+                except Exception as e:
+                    task.append_trace('video_url_resolve_failed', {'from': video_url, 'via': 'browser_js', 'error': str(e)})
+
+            task.append_trace('vlm_analyze_start', {'images': images, 'video_url': video_url, 'prompt': prompt, 'has_title': bool(title), 'has_content': bool(content)})
             
             # 将标题和文案拼接到 Prompt 中，实现图文联合分析
             full_prompt = prompt
