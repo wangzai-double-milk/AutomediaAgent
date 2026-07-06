@@ -33,6 +33,16 @@ tmp/
 *.log
 model_responses.txt
 
+# Stray media dropped at repo root (creative deliverables / scratch downloads).
+# Anchored to root only, so tracked assets/ and frontends/ media are unaffected.
+/*.mp4
+/*.mov
+/*.jpg
+/*.jpeg
+/*.png
+/*.gif
+/*.webp
+
 tasks/
 
 *.zip
