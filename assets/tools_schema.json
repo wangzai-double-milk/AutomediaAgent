@@ -41,6 +41,46 @@
   {
     "type": "function",
     "function": {
+      "name": "record_research_delta",
+      "description": "深读每一条研究样本后记录它是否给现有报告带来了新知识或修正。必须按真实样本逐条记录，重复样本不能重复计数。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "description": "样本唯一 ID 或稳定 URL"
+          },
+          "platform": {
+            "type": "string",
+            "description": "样本平台，如 xiaohongshu、douyin、bilibili、web"
+          },
+          "has_new": {
+            "type": "boolean",
+            "description": "是否产生了真正的新知识、修正或矛盾"
+          },
+          "new_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "本样本新增的知识点；没有则传空数组"
+          },
+          "revised_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "本样本修正或推翻的既有结论；没有则传空数组"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "支撑增量判断的来源引用"
+          }
+        },
+        "required": ["item_id", "platform", "has_new", "new_points", "revised_points"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "code_run",
       "description": "Code executor. Prefer python. Multi-call OK, use script param. Reply code block is executed if no script arg; prefer for single call to avoid escaping. No hardcoding bulk data",
       "parameters": {
@@ -347,7 +387,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_review",
-      "description": "Xiaohongshu food cover strict-mode review (Doubao VLM). ⚠️ HARD REQUIREMENT: callers MUST first scrape viral covers from xiaohongshu/douyin and pass their local paths via reference_images — strict-mode scoring depends on viral comparison (viral_patterns/gaps_vs_viral/roast all rely on this). See skills/hard_skills/xhs_main/SKILL.md for full flow. Returns: score / verdict (PASS|REWORK|REPHOTO) / dimensions / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / roast / title_hints / summary",
+      "description": "Xiaohongshu food cover strict-mode review (Doubao VLM). ⚠️ HARD REQUIREMENT: callers MUST first scrape viral covers from xiaohongshu/douyin and pass their local paths via reference_images — strict-mode scoring depends on viral comparison (viral_patterns/gaps_vs_viral/roast all rely on this). See skills/hard_skills/xhs_review/SKILL.md for full flow. Returns: score / verdict (PASS|REWORK|REPHOTO) / dimensions / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / roast / title_hints / summary",
       "parameters": {
         "type": "object",
         "properties": {
@@ -377,7 +417,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_edit",
-      "description": "Doubao Seedream 4.5 i2i edit. Two uses: (A) beauty edits per review.edit_prompts; (B) DRAW ANNOTATIONS on the original — red arrows + Chinese labels teaching the user how to reshoot (e.g. 'red arrow above main dish labeling 加蒸汽'). Per skills/hard_skills/xhs_main/SKILL.md, ≥2 unsuccessful rounds MUST drop to REPHOTO and stop editing.",
+      "description": "Doubao Seedream 4.5 i2i edit. Two uses: (A) beauty edits per review.edit_prompts; (B) DRAW ANNOTATIONS on the original — red arrows + Chinese labels teaching the user how to reshoot (e.g. 'red arrow above main dish labeling 加蒸汽'). Per skills/hard_skills/xhs_review/SKILL.md, ≥2 unsuccessful rounds MUST drop to REPHOTO and stop editing.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -796,12 +836,22 @@
           "sop_content": {
             "type": "string",
             "description": "技能的 Markdown 格式的 SOP 内容，包含规则、prompt模板、操作步骤等"
+          },
+          "evidence_manifest": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "支撑该技能的可追溯证据列表，至少一条，包含来源平台、样本ID/URL和验证状态"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "是否明确覆盖已有同名技能，默认 false"
           }
         },
         "required": [
           "skill_name",
           "description",
-          "sop_content"
+          "sop_content",
+          "evidence_manifest"
         ]
       }
     }

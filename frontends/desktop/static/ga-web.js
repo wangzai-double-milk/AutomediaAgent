@@ -97,6 +97,15 @@
         const limit = params.limit ?? 200;
         return http(`/session/${encodeURIComponent(sid)}/messages?after=${encodeURIComponent(after)}&limit=${encodeURIComponent(limit)}`);
       }
+      case 'session/activity': {
+        const sid = params.sessionId || params.id || params.bridgeSessionId;
+        if (!sid) throw new Error('session/activity missing sessionId');
+        return http(`/session/${encodeURIComponent(sid)}/activity`);
+      }
+      case 'platform/status':
+        return http(`/platform/status${params.force ? '?force=1' : ''}`);
+      case 'platform/open':
+        return http('/platform/open', { method: 'POST', body: params || {} });
       case 'session/cancel': {
         const sid = params.sessionId || params.id || params.bridgeSessionId;
         if (!sid) throw new Error('session/cancel missing sessionId');
@@ -127,6 +136,9 @@
     openMykeyTemplate: () => rpc('app/path/open', { kind: 'mykeyTemplate' }),
     openMykey: () => rpc('app/path/open', { kind: 'mykey' }),
     pollSession: (sessionId, afterId = 0) => rpc('session/poll', { sessionId, afterId }),
+    getActivity: (sessionId) => rpc('session/activity', { sessionId }),
+    getPlatformStatus: (force = false) => rpc('platform/status', { force }),
+    openPlatform: (platform) => rpc('platform/open', { platform }),
     rpc,
     onBridgeMessage: (cb) => on('bridge-message', cb),
     onBridgeNotification: (cb) => on('bridge-notification', cb),

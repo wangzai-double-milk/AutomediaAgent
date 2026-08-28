@@ -1,4 +1,4 @@
-import sys, os, re, json, time, threading, importlib
+import sys, os, re, json, time, threading, importlib, uuid
 from datetime import datetime
 from pathlib import Path
 import tempfile, traceback, subprocess, itertools, collections, difflib
@@ -9,6 +9,7 @@ if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent_loop import BaseHandler, StepOutcome, json_default
+from tools import research_trace
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=None, maxlen=10000):
@@ -703,17 +704,60 @@ def consume_file(dr, file):
 
 class GenericAgentHandler(BaseHandler):
     '''Generic Agent 工具库，包含多种工具的实现。工具函数自动加上了 do_ 前缀。实际工具名没有前缀。'''
-    def __init__(self, parent, last_history=None, cwd='./temp'):
+    def __init__(self, parent, last_history=None, cwd='./temp', project_root=None):
         self.parent = parent
         self.working = {}
-        self.cwd = cwd;  self.current_turn = 0
+        self.workspace_root = os.path.abspath(cwd)
+        self.project_root = os.path.abspath(project_root or os.path.dirname(__file__))
+        self.cwd = self.workspace_root  # 兼容既有 code_run/file_write 调用。
+        self.current_turn = 0
         self.history_info = last_history if last_history else []
         self.code_stop_signal = []
         self._done_hooks = []
 
     def _get_abs_path(self, path):
         if not path: return ""
-        return os.path.abspath(os.path.join(self.cwd, path))   
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        naive = os.path.abspath(os.path.join(self.cwd, path))
+        # 相对路径在项目根就能命中：保持原行为（也是新建文件 file_write 的默认落点）。
+        if os.path.exists(naive):
+            return naive
+        # 兜底：项目根找不到时，按最可能的位置找一个"已存在"的同名文件再返回。
+        # 只在目标已存在时才改写路径——新建文件 write 绝不会被静默重定向到别处。
+        try:
+            cands = []
+            td = getattr(self.parent, 'task_dir', None)
+            if td:
+                cands.append(os.path.join(td, path))            # 本任务产出：research_report.md / viral_meta.json ...
+            cands.append(os.path.join(self.project_root, 'skills', 'hard_skills', path))
+            cands.append(os.path.join(self.project_root, 'skills', 'soft_skills', path))
+            cands.append(os.path.join(self.project_root, 'memory', path))
+            for c in cands:
+                c = os.path.abspath(c)
+                if os.path.exists(c):
+                    return c
+            # 裸文件名（无目录分隔）的兜底解析。
+            base = os.path.basename(path)
+            if base == path:
+                # 裸 SKILL.md 高歧义（每个技能都叫这个名）：保守默认解析到冷启动该读的
+                # agent_core/SKILL.md，而不是放弃（放弃会让 agent 被迫 os.walk 全盘 find）。
+                if base.lower() == 'skill.md':
+                    ac = os.path.join(self.project_root, 'skills', 'hard_skills', 'agent_core', 'SKILL.md')
+                    if os.path.exists(ac):
+                        return ac
+                # 其他裸文件名：只在 task_dir 下唯一命中时才兜底解析；多处同名就保持
+                # 项目根相对路径，让上层改用绝对路径，避免静默读错文件。
+                elif td:
+                    hits = []
+                    for root, _dirs, files in os.walk(td):
+                        if base in files:
+                            hits.append(os.path.join(root, base))
+                    if len(hits) == 1:
+                        return hits[0]
+        except Exception:
+            pass
+        return naive
 
     def _extract_code_block(self, response, code_type):
         code_type = {'python':'python|py', 'powershell':'powershell|ps1|pwsh', 'bash':'bash|sh|shell'}.get(code_type, re.escape(code_type))
@@ -750,14 +794,76 @@ class GenericAgentHandler(BaseHandler):
     def do_ask_user(self, args, response):
         question = args.get("question", "请提供输入：")
         candidates = args.get("candidates", [])
+        # 收尾守卫：只在这次 ask_user 语义上是"收尾/结束/交付确认"时才校验收敛，
+        # 避免误拦研究途中的关键澄清提问（那类提问阅读量还没上来很正常，不该被拦）。
+        if self._is_finish_intent(args, question):
+            _cgate = self._research_convergence_gate()
+            if _cgate is not None:
+                yield '[Block] 调研尚未收敛（阅读量/检索面不足），已拦截收尾\n'
+                return _cgate
         result = ask_user(question, candidates)
         yield f"Waiting for your answer ...\n"
         return StepOutcome(result, next_prompt="", should_exit=True)
+
+    @staticmethod
+    def _is_finish_intent(args, question):
+        '''判断这次 ask_user 是不是"收尾/交付确认"意图。
+        显式信号优先：purpose/intent == finish|done|wrapup 或 finish=true；
+        否则看问题文本是否明显在说"做完了/是否结束/报告是否可以/要不要继续"。'''
+        try:
+            purpose = str(args.get('purpose') or args.get('intent') or '').lower()
+            if purpose in ('finish', 'done', 'wrapup', 'wrap_up', 'complete', 'end'):
+                return True
+            if args.get('finish') is True or args.get('is_finish') is True:
+                return True
+            q = str(question or '')
+            finish_kw = ('收尾', '完成了', '已完成', '结束任务', '是否结束', '是否继续',
+                         '还需要继续', '要不要继续', '报告是否', '报告可以', '交付',
+                         '调研完成', '总结完成', '是否满意', 'finish', 'done')
+            return any(k in q for k in finish_kw)
+        except Exception:
+            return False
     
 
 
+    def _trace_report_write(self, path, content, mode):
+        '''给报告/总结类文件的写入动作补 trace 埋点：记轮次、行数、字数、模式。
+        普通文件（世界模型、脚本、SOP）不记，避免噪声。任何异常都吞掉，绝不影响写入主流程。'''
+        try:
+            pl = (path or '').lower()
+            is_report = any(k in pl for k in ('research_report', 'report', 'summary', '总结', '报告', '调研'))
+            if not is_report:
+                return
+            task = self._xhs_task()
+            if not task:
+                return
+            # patch 模式没有单段 content，读回整文件算行数更准；write 模式直接量当前文件全貌。
+            lines = chars = None
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    full = f.read()
+                lines, chars = full.count('\n') + 1, len(full)
+            except Exception:
+                if isinstance(content, str):
+                    lines, chars = content.count('\n') + 1, len(content)
+            task.append_trace('report_write', {
+                'file': os.path.basename(path),
+                'mode': mode,
+                'turn': self.current_turn,
+                'total_lines': lines,
+                'total_chars': chars,
+            })
+        except Exception:
+            pass
+
     def do_file_patch(self, args, response):
         path = self._get_abs_path(args.get("path", ""))
+        # 硬 gate：报告是滚动更新的，后续追加也走 patch——patch 同样要过媒体理解闸门，
+        # 否则先写一版空壳报告后就能一路 patch 塞进没看过的图/视频，绕过 file_write 的 gate。
+        _mgate = self._media_understanding_gate(path, args)
+        if _mgate is not None:
+            yield '[Block] patch 报告前未真正理解图片/视频素材，已拦截\n'
+            return _mgate
         yield f"[Action] Patching file: {path}\n"
         old_content = args.get("old_content", "")
         new_content = args.get("new_content", "")
@@ -767,6 +873,8 @@ class GenericAgentHandler(BaseHandler):
             return StepOutcome({"status": "error", "msg": str(e)}, next_prompt="\n")
         result = file_patch(path, old_content, new_content)
         yield f"\n{str(result)}\n"
+        if isinstance(result, dict) and result.get('status') == 'success':
+            self._trace_report_write(path, None, 'patch')
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome(result, next_prompt=next_prompt)
     
@@ -774,6 +882,11 @@ class GenericAgentHandler(BaseHandler):
         '''用于对整个文件的大量处理，精细修改要用file_patch。
         需要将要写入的内容放在<file_content>标签内，或者放在代码块中'''
         path = self._get_abs_path(args.get("path", ""))
+        # 硬 gate：写研究报告前必须先真正理解手里的图片/视频素材，否则拦截。
+        _mgate = self._media_understanding_gate(path, args)
+        if _mgate is not None:
+            yield '[Block] 写报告前未真正理解图片/视频素材，已拦截\n'
+            return _mgate
         mode = args.get("mode", "overwrite")  # overwrite/append/prepend
         action_str = {"prepend": "Prepending to", "append": "Appending to"}.get(mode, "Overwriting")
         yield f"[Action] {action_str} file: {os.path.basename(path)}\n"
@@ -797,6 +910,7 @@ class GenericAgentHandler(BaseHandler):
             else:
                 with open(path, 'a' if mode == "append" else 'w', encoding="utf-8") as f: f.write(new_content)
             yield f"[Status] ✅ {mode.capitalize()} 成功 ({len(new_content)} bytes)\n"
+            self._trace_report_write(path, new_content, mode)
             next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
             return StepOutcome({"status": "success", 'writed_bytes': len(new_content)}, next_prompt=next_prompt)
         except Exception as e:
@@ -808,7 +922,13 @@ class GenericAgentHandler(BaseHandler):
         path = self._get_abs_path(args.get("path", ""))
         yield f"\n[Action] Reading file: {path}\n"
         start = args.get("start", 1)
+        # 默认 200 行；agent 常自作聪明传个小 count（如 80）想省上下文，
+        # 反而要多读几次。除非它明确要"更多"，否则强制下限 200，别省。
         count = args.get("count", 200)
+        try:
+            count = max(int(count), 200)
+        except Exception:
+            count = 200
         keyword = args.get("keyword")
         show_linenos = args.get("show_linenos", True)
         result = file_read(path, start=start, keyword=keyword,
@@ -853,6 +973,25 @@ class GenericAgentHandler(BaseHandler):
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         #next_prompt += '\n[SYSTEM TIPS] 此函数一般在任务开始或中间时调用，如果任务已成功完成应该是start_long_term_update用于结算长期记忆。\n'
         return StepOutcome({"result": "working key_info updated"}, next_prompt=next_prompt)
+
+    def do_record_research_delta(self, args, response):
+        """记录本次深读对报告知识体系造成的新增/修正，供收敛守卫核验。"""
+        item_id = str(args.get('item_id') or '').strip()
+        if not item_id:
+            return StepOutcome({'status': 'error', 'msg': 'item_id 必填'}, next_prompt='\n')
+        new_points = args.get('new_points') or []
+        revised_points = args.get('revised_points') or []
+        if not isinstance(new_points, list) or not isinstance(revised_points, list):
+            return StepOutcome({'status': 'error', 'msg': 'new_points/revised_points 必须是数组'}, next_prompt='\n')
+        has_new = bool(args.get('has_new') or new_points or revised_points)
+        payload = research_trace.append_knowledge_delta(
+            self._xhs_task(), item_id=item_id, has_new=has_new,
+            new_points=new_points, revised_points=revised_points,
+            evidence_refs=args.get('evidence_refs') or [],
+            platform=args.get('platform') or '',
+        )
+        yield f"[Info] 研究增量已记录: item={item_id} has_new={has_new}\n"
+        return StepOutcome({'status': 'ok', **payload}, next_prompt=self._get_anchor_prompt())
 
     def _retry_or_exit(self, prompt):
         self._empty_ct = getattr(self, '_empty_ct', 0) + 1
@@ -905,6 +1044,12 @@ class GenericAgentHandler(BaseHandler):
             remaining = self._check_plan_completion()
             if remaining == 0:
                 self._exit_plan_mode(); yield "[Info] Plan完成：plan.md中0个[ ]残留，退出plan模式。\n"
+
+        # 普通 final 与 finish 型 ask_user 必须经过同一收尾守卫，不能通过不调用工具绕过。
+        _cgate = self._research_convergence_gate()
+        if _cgate is not None:
+            yield "[Block] 调研尚未收敛，已拦截直接 final\n"
+            return _cgate
         
         yield "[Info] Final response to user.\n"
         return StepOutcome(response, next_prompt=None)
@@ -918,6 +1063,12 @@ class GenericAgentHandler(BaseHandler):
     def _xhs_task(self):
         '''task workspace 模块（轻量，无外部依赖）。'''
         from tools import task as _xhs_task
+        parent_task_dir = getattr(self.parent, 'task_dir', None)
+        current = _xhs_task.get_current()
+        if parent_task_dir and current != parent_task_dir:
+            _xhs_task.set_current(parent_task_dir)
+        elif current and not parent_task_dir:
+            self.parent.task_dir = current
         return _xhs_task
 
     def _js_ret(self, res):
@@ -1009,8 +1160,209 @@ class GenericAgentHandler(BaseHandler):
             pass
         return StepOutcome({'status': 'error', 'msg': err}, next_prompt='\n')
 
+    def _media_understanding_gate(self, path, args):
+        '''硬 gate：写研究报告前，凡是手里有图片/视频素材，就必须先真正"看过"
+        （调用过 analyze_media），否则拦截。对应纪律「图片要理解图片、视频要理解视频，
+        不然给不出对应建议」。放行条件用"尝试过理解"(vlm_analyze_start)而非"成功"，
+        这样真拉不到流/图挂了也不会死锁——那种情况交给报告里如实降级。
+
+        返回 None 放行；返回 StepOutcome 表示拦截。'''
+        # 只在写"报告/总结"类产出时把关，普通文件（世界模型、脚本、SOP）不拦。
+        pl = (path or '').lower()
+        is_report = any(k in pl for k in ('research_report', 'report', 'summary', '总结', '报告', '调研'))
+        if not is_report:
+            return None
+        # 注意：这里不再因 _index>0（同一轮批量调用的第二个工具）而放行——报告写入是硬闸门，
+        # 否则"同一轮里先塞个别的工具再 file_write/patch 报告"就能绕过。
+
+        task = self._xhs_task()
+        task_dir = task.get_current() if task else None
+        if not task_dir:
+            return None
+        log_path = os.path.join(task_dir, 'trace.log')
+        if not os.path.isfile(log_path):
+            return None
+
+        # 扫 trace：手里到底有没有图/视频素材，以及有没有真去理解过。
+        has_image_material = False
+        has_video_material = False
+        understood_image = False
+        understood_video = False
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    step = rec.get('step', '')
+                    pay = rec.get('payload', {}) or {}
+                    # 素材来源：抓过爆款封面/多图、点进过笔记详情
+                    if step == 'search_viral_done' and (pay.get('count') or 0) > 0:
+                        has_image_material = True
+                    if step == 'get_feed_detail_done' and pay.get('ok'):
+                        has_image_material = True
+                    # 视频素材：抠到过真实流地址、或对视频调过分析
+                    if step == 'video_url_resolved':
+                        has_video_material = True
+                    # 只有模型成功返回完整结果才算真正理解；start/error/skip 都不算。
+                    if step in ('vlm_analyze_succeeded', 'vlm_analyze_done'):
+                        result = str(pay.get('result') or '')
+                        if result.startswith('[Error]') or result.startswith('【⚠️未完成'):
+                            continue
+                        if pay.get('images'):
+                            understood_image = True
+                        if pay.get('video_url'):
+                            understood_video = True
+                            has_video_material = True
+        except Exception:
+            return None
+
+        # 兜底：viral_refs/ 目录里真有图片文件也算有图片素材（trace 可能被裁剪/异常）
+        if not has_image_material:
+            try:
+                refs = os.path.join(task_dir, 'viral_refs')
+                for root, _dirs, files in os.walk(refs):
+                    if any(fn.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')) for fn in files):
+                        has_image_material = True
+                        break
+            except Exception:
+                pass
+
+        # 只对"手里真有的素材"强制理解，避免死锁：
+        #   - 抓了图却没看图 → 拦
+        #   - 真抠到/传入了视频流却没看那条视频 → 拦
+        # 不靠"任务名像视频"来强制视频（很多平台/笔记本就没有视频，硬逼会永远写不出报告）；
+        # "视频类任务必须去视频平台看视频"交给 research_mode 的行为规范管，不放进会死锁的代码闸门。
+        missing = []
+        if has_image_material and not understood_image:
+            missing.append('图片素材（尚无一次成功的 analyze_media 图片理解）')
+        if has_video_material and not understood_video:
+            missing.append('视频内容（尚无一次成功的 analyze_media 视频理解）')
+
+        if not missing:
+            return None
+
+        err = (
+            'BLOCKED: 禁止在没真正理解媒体素材的情况下写报告/总结。\n'
+            '缺失证据：\n  - ' + '\n  - '.join(missing) + '\n'
+            '硬性纪律：图片要用 analyze_media 真看图、视频要用 analyze_media 真看整段视频，'
+            '否则给不出对应建议（等于闭眼编）。\n'
+            '请先对相应素材调用 analyze_media（图片可一次传多张，seed 2.x pro 支持多图同时理解；'
+            '视频抠真实流后整段上传），再来写报告。\n'
+                '实在无法理解媒体时，不要伪装完成；请用 ask_user 明确报告当前阻塞并请求阶段性交付授权。'
+        )
+        if task:
+            try:
+                task.append_trace('media_understanding_gate_BLOCKED', {
+                    'path': os.path.basename(path),
+                    'has_image_material': has_image_material,
+                    'has_video_material': has_video_material,
+                    'understood_image': understood_image,
+                    'understood_video': understood_video,
+                })
+            except Exception:
+                pass
+        return StepOutcome({'status': 'error', 'msg': err}, next_prompt='\n')
 
 
+    def _research_convergence_gate(self):
+        '''收尾守卫：research 任务想用 ask_user 收尾时，兜底拦住"看得太少就想收工"。
+
+        ⚠️ 关键设计（对应用户纠正）：**不用报告行数/产出量判断是否收敛**——因为归纳、
+        精简、重构会让行数不涨甚至变少，用行数判收敛＝惩罚归纳。代码只客观兜底"阅读量/
+        检索面够不够"这个下限；"最近连续 N 条内容有没有新知识"是语义判断，代码算不出，
+        交给 agent 自己判断 + 行为纪律（agent_core 纪律7）。判定逻辑在 tools.convergence。
+
+        避免误伤/死锁：
+          - 还没写过任何报告 → 不是研究收尾（澄清提问/非研究任务）→ 放行；
+          - 阅读量+搜索轮次达到客观下限 → 放行（是否真没新知识交给 agent）；
+          - 看得明显不够就想停 → 拦一次催它继续；最多拦 MAX_BLOCKS 次后无条件放行。
+
+        返回 None 放行；返回 StepOutcome 表示拦截。'''
+        try:
+            from tools import convergence
+            task = self._xhs_task()
+            task_dir = task.get_current() if task else None
+            if not task_dir:
+                return None
+            log_path = os.path.join(task_dir, 'trace.log')
+            if not os.path.isfile(log_path):
+                return None
+            wrote_report = False
+            search_keys = set()
+            read_keys = set()   # 去重统计"深读过的内容条数"：点开详情的 feed / 看过的视频流
+            delta_items = set()
+            consecutive_no_new = 0
+            failed_media = set()
+            with open(log_path, 'r', encoding='utf-8') as f:
+                for line_no, line in enumerate(f):
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    step = rec.get('step', '')
+                    pay = rec.get('payload', {}) or {}
+                    if step == 'report_write':
+                        wrote_report = True
+                    elif step == research_trace.SEARCH_ROUND_STEP or step in research_trace.LEGACY_SEARCH_STEPS:
+                        # 新平台统一写 research_search_round；旧小红书 trace 继续兼容。
+                        # 同一次搜索若同时写新/旧 trace，会共享 round_id，这里只算一轮。
+                        search_keys.add(research_trace.search_round_key(step, pay, line_no))
+                    elif step == research_trace.ITEM_READ_STEP:
+                        # 统一的"深读一条内容"信号（图文笔记 + 视频/网页详情），带 id 去重。
+                        read_keys.add(research_trace.item_read_key(pay, len(read_keys)))
+                    elif step == 'get_feed_detail_done' and pay.get('ok'):
+                        # 兼容旧 trace（没有 research_item_read 的历史任务）。
+                        read_keys.add(('xiaohongshu', 'note', pay.get('feed_id') or len(read_keys)))
+                    elif step in ('vlm_analyze_succeeded', 'vlm_analyze_done') and pay.get('video_url'):
+                        result = str(pay.get('result') or '')
+                        if not result.startswith('[Error]') and not result.startswith('【⚠️未完成'):
+                            read_keys.add(('video', 'stream', pay.get('video_url')))
+                            failed_media.discard(pay.get('media_key') or pay.get('video_url'))
+                    elif step == 'vlm_analyze_failed':
+                        failed_media.add(pay.get('media_key') or pay.get('video_url') or pay.get('call_id'))
+                    elif step == research_trace.KNOWLEDGE_DELTA_STEP:
+                        item_id = pay.get('item_id')
+                        if not item_id or item_id in delta_items:
+                            continue
+                        delta_items.add(item_id)
+                        if pay.get('has_new') or pay.get('new_points') or pay.get('revised_points'):
+                            consecutive_no_new = 0
+                        else:
+                            consecutive_no_new += 1
+            # 没写过报告 = 不是研究收尾（澄清提问 / 非研究任务），不干预。
+            if not wrote_report:
+                return None
+            notes_read = len(read_keys)
+            search_rounds = len(search_keys)
+            if convergence.research_converged(
+                    notes_read, search_rounds, consecutive_no_new,
+                    unresolved_media=len(failed_media)):
+                return None
+            try:
+                task.append_trace('convergence_gate_BLOCKED', {
+                    'notes_read': notes_read,
+                    'search_rounds': search_rounds,
+                    'consecutive_no_new': consecutive_no_new,
+                    'unresolved_media': len(failed_media),
+                })
+            except Exception:
+                pass
+            err = (
+                'BLOCKED: 现在还不能收尾。本任务目标是"像人一样边搜边看、一直挖到没有新知识为止"，'
+                '当前客观阅读量还不够：\n'
+                f'  - 深读过的内容约 {notes_read} 条、搜索轮次 {search_rounds}。\n'
+                f'  - 最近连续零新增 {consecutive_no_new} 条、未解决媒体失败 {len(failed_media)} 个。\n'
+                '请继续：换新关键词再搜、点开还没看过的爆款/视频真看（analyze_media），'
+                '每深读一条后调用 record_research_delta 记录真正新增/修正；重复已知则 has_new=false。\n'
+                '收尾的正确标准不是"报告写够长"，而是**你连续看了若干条都挖不出新知识点**——'
+                '当你确认最近连续 5~10 条都只在重复已知、没有新东西时，再来 ask_user 收尾。\n'
+                '（若卡在某条打不开——换一条能看的继续，别拿"卡住"当收尾理由；真到无新可挖，本守卫会自动放行。）'
+            )
+            return StepOutcome({'status': 'error', 'msg': err}, next_prompt='\n')
+        except Exception:
+            return None
 
 
     def _xhs_actions(self):
@@ -1065,8 +1417,43 @@ class GenericAgentHandler(BaseHandler):
         h_str = "\n".join(h[-W:])
         prompt = f"\n### [WORKING MEMORY]\n{earlier}<history>\n{h_str}\n</history>"
         prompt += f"\nCurrent turn: {self.current_turn}\n"
+        # 让 agent 始终知道"自己在哪"——否则只能瞎猜裸文件名（如 file_read("SKILL.md")），
+        # 猜不中就被迫 os.walk 全盘搜。给出当前任务目录 + 常用路径的绝对坐标。
+        _td = getattr(self.parent, 'task_dir', None)
+        if _td:
+            _sk = lambda m: os.path.join(self.project_root, 'skills/hard_skills', m, 'SKILL.md')
+            prompt += (f"\n<paths>\n项目根: {self.project_root}\n运行工作区(workspace): {self.workspace_root}\n当前任务目录(task_dir): {_td}\n"
+                       f"· 读本任务产出(报告/素材)用绝对路径，如 {os.path.join(_td, 'research_report.md')}\n"
+                       f"· 读技能/SOP 直接用下面的**确切绝对路径**（不要传裸文件名 SKILL.md，会歧义）：\n"
+                       f"    冷启动/纪律: {_sk('agent_core')}\n"
+                       f"    调研模式:   {_sk('research_mode')}\n"
+                       f"    运营模式:   {_sk('operate_mode')}\n"
+                       f"· file_read/file_write 的相对路径默认相对运行工作区解析；项目文件和任务产出优先使用上面的绝对路径。\n</paths>")
         if self.working.get('key_info'): prompt += f"\n<key_info>{self.working.get('key_info')}</key_info>"
-        if self.working.get('related_sop'): prompt += f"\n有不清晰的地方请再次读取{self.working.get('related_sop')}"
+        if self.working.get('related_sop'):
+            related = str(self.working.get('related_sop') or '')
+            registry_path = os.path.join(self.project_root, 'skills', 'registry.json')
+            try:
+                registry = json.load(open(registry_path, encoding='utf-8'))
+                valid_names = set((registry.get('skills') or {}).keys())
+                parts = [p.strip() for p in related.split(',') if p.strip()]
+                parts = [
+                    p for p in parts
+                    if os.path.splitext(os.path.basename(os.path.dirname(p) if p.lower().endswith('skill.md') else p))[0] in valid_names
+                    or os.path.splitext(os.path.basename(p))[0] in valid_names
+                ]
+                related = ', '.join(parts)
+            except Exception:
+                pass
+            if not related:
+                self.working.pop('related_sop', None)
+        if self.working.get('related_sop'):
+            prompt += (
+                "\n<internal_sop_reminder>\n"
+                f"系统自动提示：如下一步依赖 SOP，请必要时重新读取：{related}\n"
+                "这不是用户新消息，也不是用户重复发言；不得把本提示理解成收尾、交付或停止继续调查的信号。\n"
+                "</internal_sop_reminder>"
+            )
         if getattr(self.parent, 'verbose', False):
             try: print(prompt)
             except: pass
@@ -1156,6 +1543,7 @@ class GenericAgentHandler(BaseHandler):
         try:
             task = self._xhs_task()
             info = task.init_task(user_request, image)
+            self.parent.task_dir = info['task_dir']
         except Exception as e:
             traceback.print_exc()
             return StepOutcome({'status': 'error', 'msg': str(e)}, next_prompt='\n')
@@ -1213,14 +1601,17 @@ class GenericAgentHandler(BaseHandler):
             
         yield f'[Action] VLM 图文联合分析({media_desc}): {prompt[:50]}...\n'
         task = self._xhs_task()
+        call_id = uuid.uuid4().hex
+        media_key = video_url or '|'.join(str(x) for x in images)
         
         try:
             xhs_image = self._xhs_import()
 
-            # 如果模型/Agent 传进来的是抖音详情页 URL，而不是真实视频流 URL，
-            # 先从当前浏览器详情页的 <video> / performance / SSR JSON 里抠真实流。
+            # 如果模型/Agent 传进来的是视频详情页 URL（抖音 /video/、小红书 /explore/），
+            # 而不是真实视频流 URL，先从当前浏览器详情页的 <video> / performance / SSR JSON 里抠真实流。
             # 这能避免把 text/html 页面链接交给 Files API 导致 mimetype=text/html 报错。
-            if isinstance(video_url, str) and 'douyin.com/video/' in video_url and not xhs_image._is_direct_video_url(video_url):
+            # 抖音真实流在 douyinvod.com（DASH 双轨），小红书在 sns-video*.xhscdn.com/stream/（单文件 mp4）。
+            if isinstance(video_url, str) and xhs_image._is_video_page_url(video_url) and not xhs_image._is_direct_video_url(video_url):
                 extract_js = r"""
 (() => {
   const out = new Set();
@@ -1231,6 +1622,7 @@ class GenericAgentHandler(BaseHandler):
     if (u.startsWith('blob:')) return;
     if (/douyin_pc_client|download\/douyin_pc|static\.bytednsdoc\.com\/obj\/eden-cn|\.exe/i.test(u)) return;
     if (/douyinvod\.com|\/video\/tos\/|\.mp4|\.m3u8/i.test(u)) out.add(u);
+    else if (/xhscdn\.com\/stream\//i.test(u)) out.add(u);
   };
   for (const v of document.querySelectorAll('video')) {
     add(v.currentSrc); add(v.src); add(v.getAttribute('src'));
@@ -1256,7 +1648,7 @@ class GenericAgentHandler(BaseHandler):
     try { walk(window[name]); } catch(e) {}
   }
   const cands = Array.from(out).sort((a,b) => {
-    const score = (u) => (u.includes('douyinvod.com') ? 100 : 0) + (u.includes('.mp4') ? 50 : 0) + (u.includes('.m3u8') ? 30 : 0) - (u.includes('playwm') ? 10 : 0);
+    const score = (u) => (u.includes('douyinvod.com') ? 100 : 0) + ((u.includes('xhscdn.com') && u.includes('/stream/')) ? 100 : 0) + (u.includes('.mp4') ? 50 : 0) + (u.includes('.m3u8') ? 30 : 0) - (u.includes('playwm') ? 10 : 0);
     return score(b) - score(a);
   });
   return JSON.stringify({url: cands[0] || '', candidates: cands.slice(0, 8), page: location.href});
@@ -1281,25 +1673,75 @@ class GenericAgentHandler(BaseHandler):
                 except Exception as e:
                     task.append_trace('video_url_resolve_failed', {'from': video_url, 'via': 'browser_js', 'error': str(e)})
 
-            task.append_trace('vlm_analyze_start', {'images': images, 'video_url': video_url, 'prompt': prompt, 'has_title': bool(title), 'has_content': bool(content)})
-            
             # 将标题和文案拼接到 Prompt 中，实现图文联合分析
             full_prompt = prompt
             if title or content:
                 full_prompt = f"【帖子标题】: {title}\n【帖子正文】: {content}\n\n【分析指令】: {prompt}"
                 
-            # 将视频 URL 也加入到图像列表中，底层通过多模态接口处理
+            # 将视频 URL 也加入到图像列表中，底层通过多模态接口处理。
+            # ⚠️ 闸门：只有"真实流"才喂给 Files API。如果抠流没成功、video_url 还是详情页 URL
+            # （抖音 /video/、?modal_id=、小红书 /explore/），绝不能当图片/视频直传——那会稳定报
+            # HTTP 400 image format not supported，还会让模型误以为"看过了视频"。直接如实报错，
+            # 让上层知道要先在浏览器里把视频播起来再抠流。
             media_list = list(images)
             if video_url:
-                media_list.append(video_url)
-                
+                if xhs_image._is_direct_video_url(video_url):
+                    media_list.append(video_url)
+                elif xhs_image._is_video_page_url(video_url):
+                    task.append_trace('video_understanding_skipped', {
+                        'video_url': video_url,
+                        'reason': '抠流失败：拿到的是详情页 URL 而非真实视频流，未喂给 VLM（避免 HTTP 400 / 假装看过）',
+                    })
+                    if not media_list:
+                        task.append_trace('vlm_analyze_failed', {
+                            'call_id': call_id, 'media_key': media_key,
+                            'images': images, 'video_url': video_url,
+                            'error': '未能从详情页抠到真实视频流',
+                        })
+                        yield '  → 未能抠到真实视频流，跳过本次视频理解\n'
+                        return StepOutcome({
+                            'status': 'error',
+                            'msg': ('视频流抠取失败：video_url 仍是详情页地址（' + video_url + '），'
+                                    '不是真实流，未做视频理解。请先在浏览器里打开该视频详情页并让它实际播放'
+                                    '（抖音 DASH 双轨需 buffer 起来、小红书单文件 mp4），'
+                                    '再从 performance/currentSrc/SSR JSON 抠出真实流地址后重试。'),
+                        }, next_prompt='\n')
+                    video_url = ''
+                else:
+                    media_list.append(video_url)
+
+            media_key = video_url or '|'.join(str(x) for x in images)
+            task.append_trace('vlm_analyze_start', {
+                'call_id': call_id, 'media_key': media_key,
+                'images': images, 'video_url': video_url, 'prompt': prompt,
+                'has_title': bool(title), 'has_content': bool(content),
+            })
             analysis_result = xhs_image.analyze_image(media_list, full_prompt)
         except Exception as e:
             traceback.print_exc()
-            task.append_trace('vlm_analyze_error', {'error': str(e)})
+            task.append_trace('vlm_analyze_failed', {
+                'call_id': call_id, 'media_key': media_key,
+                'images': images, 'video_url': video_url, 'error': str(e),
+            })
             return StepOutcome({'status': 'error', 'msg': str(e)}, next_prompt='\n')
-            
-        task.append_trace('vlm_analyze_done', {'result': analysis_result})
+
+        result_text = str(analysis_result or '')
+        if not result_text or result_text.startswith('[Error]') or result_text.startswith('【⚠️未完成'):
+            state = 'partial' if result_text.startswith('【⚠️未完成') else 'error'
+            task.append_trace('vlm_analyze_failed', {
+                'call_id': call_id, 'media_key': media_key,
+                'images': images, 'video_url': video_url,
+                'error': result_text or '模型返回空内容', 'state': state,
+            })
+            yield f'  → VLM 分析未成功: {result_text[:160]}\n'
+            return StepOutcome({'status': state, 'msg': result_text}, next_prompt='\n')
+
+        success_payload = {
+            'call_id': call_id, 'media_key': media_key,
+            'images': images, 'video_url': video_url, 'result': analysis_result,
+        }
+        task.append_trace('vlm_analyze_succeeded', success_payload)
+        task.append_trace('vlm_analyze_done', success_payload)  # 兼容历史审计工具。
         yield f'  → VLM 分析完成，结果已返回\n'
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome({'status': 'ok', 'analysis': analysis_result}, next_prompt=next_prompt)
@@ -1809,6 +2251,17 @@ class GenericAgentHandler(BaseHandler):
                     n_ocr = sum(1 for t in img_texts if t and not t.startswith('<'))
                     n_real = sum(1 for p in img_local if not p.startswith('<'))
                     early_stop_tag = '' if (not img_urls or n_real == len(img_urls)) else f' [早停:{n_real}/{len(img_urls)}图,纯食物]'
+                    # 统一"深读一条内容"埋点：图文笔记看完正文/多图/评论也算读过一条，
+                    # 供收敛守卫统计（不再只认 get_feed_detail / 视频）。带 feed_id 便于去重。
+                    try:
+                          research_trace.append_item_read(
+                              task, 'xiaohongshu', 'note', item_id=note_id,
+                              has_media_understood=False,  # 仅抓取+OCR，真正 VLM 看图另由 vlm_analyze_start 记
+                              n_images=n_real,
+                              desc_len=len(c["content"].get("desc") or ''),
+                          )
+                    except Exception:
+                        pass
                     yield f'    [{i+1}/{content_n}] {(c["content"]["title"] or "")[:30]}... ({len(c["content"]["desc"])} 字, {n_real} 图/{n_ocr} OCR, {len(c["content"]["comments"])} 评论){early_stop_tag}\n'
                 except Exception as e:
                     c['content'] = {'error': str(e)}
@@ -1820,7 +2273,18 @@ class GenericAgentHandler(BaseHandler):
             with open(os.path.join(td, 'viral_meta.json'), 'w', encoding='utf-8') as f:
                 json.dump({'keyword': keyword, 'covers': covers}, f, ensure_ascii=False, indent=2)
 
-        task.append_trace('search_viral_done', {'count': len(local_paths), 'keyword': keyword, 'fetch_content': fetch_content})
+        round_id = research_trace.make_round_id('xiaohongshu', 'xhs_search_viral', keyword)
+        task.append_trace('search_viral_done', {
+            'round_id': round_id,
+            'count': len(local_paths),
+            'keyword': keyword,
+            'fetch_content': fetch_content,
+        })
+        research_trace.append_search_round(
+            task, 'xiaohongshu', 'xhs_search_viral',
+            keyword=keyword, count=len(local_paths), round_id=round_id,
+            fetch_content=fetch_content,
+        )
         yield f'  → 已下载 {len(local_paths)} 张到 {viral_dir}\n'
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome({
@@ -2027,7 +2491,8 @@ class GenericAgentHandler(BaseHandler):
 
         yield f'[Action] 发草稿到创作中心: {len(images)} 张图, title={title[:40]}, {len(norm_tags)} 个 tag\n'
         task.append_trace('publish_draft_start', task._trim({
-            'images': images, 'title': title, 'desc_len': len(desc), 'tags': norm_tags,
+            'images': images, 'title': title, 'desc': desc,
+            'desc_len': len(desc), 'tags': norm_tags,
         }))
 
         # 0) 关键：先把 default tab 切到小红书页（否则 web_execute_js 发到错误 tab，操作全部落空）
@@ -2514,7 +2979,18 @@ class GenericAgentHandler(BaseHandler):
             traceback.print_exc()
             task.append_trace('search_feeds_error', {'error': str(e)})
             return StepOutcome({'status': 'error', 'msg': str(e)}, next_prompt='\n')
-        task.append_trace('search_feeds_done', {'count': r.get('count'), 'filters_applied': r.get('filters_applied')})
+        round_id = research_trace.make_round_id('xiaohongshu', 'xhs_search_feeds', keyword)
+        task.append_trace('search_feeds_done', {
+            'round_id': round_id,
+            'count': r.get('count'),
+            'filters_applied': r.get('filters_applied'),
+            'keyword': keyword,
+        })
+        research_trace.append_search_round(
+            task, 'xiaohongshu', 'xhs_search_feeds',
+            keyword=keyword, count=r.get('count'), round_id=round_id,
+            filters_applied=r.get('filters_applied'),
+        )
         yield f"[Action] 搜索 '{keyword}': {r.get('count')} 条 (筛选 {r.get('filters_applied')})\n"
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome({'status': 'ok' if r.get('ok') else 'fail', **r}, next_prompt=next_prompt)
@@ -2539,7 +3015,15 @@ class GenericAgentHandler(BaseHandler):
             traceback.print_exc()
             task.append_trace('get_feed_detail_error', {'error': str(e)})
             return StepOutcome({'status': 'error', 'msg': str(e)}, next_prompt='\n')
-        task.append_trace('get_feed_detail_done', {'ok': r.get('ok'), 'comment_count': r.get('comment_count')})
+        task.append_trace('get_feed_detail_done', {'ok': r.get('ok'), 'feed_id': feed_id, 'comment_count': r.get('comment_count')})
+        if r.get('ok'):
+            try:
+                  research_trace.append_item_read(
+                      task, 'xiaohongshu', 'note', item_id=feed_id,
+                      has_media_understood=False,
+                  )
+            except Exception:
+                pass
         yield f"[Action] 笔记详情: ok={r.get('ok')} 评论 {r.get('comment_count', 0)} 条\n"
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome({'status': 'ok' if r.get('ok') else 'fail', **r}, next_prompt=next_prompt)
@@ -2669,20 +3153,35 @@ class GenericAgentHandler(BaseHandler):
 
 
     def do_create_skill(self, args, response):
-        skill_name = args.get("skill_name")
-        description = args.get("description")
-        sop_content = args.get("sop_content")
+        skill_name = str(args.get("skill_name") or "").strip()
+        description = str(args.get("description") or "").strip()
+        sop_content = str(args.get("sop_content") or "").strip()
+        evidence_manifest = args.get("evidence_manifest") or []
 
-        if not skill_name or not sop_content:
-            yield "Missing skill_name or sop_content\n"
+        if not skill_name or not description or not sop_content:
+            yield "Missing skill_name, description or sop_content\n"
             return StepOutcome(None, next_prompt="创建技能失败，参数不完整")
+        if not re.fullmatch(r'[a-z][a-z0-9_]{1,63}', skill_name):
+            return StepOutcome(
+                {'status': 'error', 'msg': 'skill_name 仅允许 2-64 位小写字母、数字和下划线，且必须以字母开头'},
+                next_prompt='\n',
+            )
+        if not isinstance(evidence_manifest, list) or not evidence_manifest:
+            return StepOutcome(
+                {'status': 'error', 'msg': 'evidence_manifest 必须提供至少一条可追溯证据'},
+                next_prompt='\n',
+            )
 
-        # 默认保存到 skills/local 目录下，实现 core 与 local 的隔离
-        skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'skills', 'local')
+        skills_dir = os.path.join(self.project_root, 'skills', 'soft_skills')
         skill_folder = os.path.join(skills_dir, skill_name)
         os.makedirs(skill_folder, exist_ok=True)
         
         md_path = os.path.join(skill_folder, "SKILL.md")
+        if os.path.exists(md_path) and not args.get('overwrite'):
+            return StepOutcome(
+                {'status': 'error', 'msg': f'技能已存在，拒绝静默覆盖: {md_path}'},
+                next_prompt='\n',
+            )
 
         frontmatter = f"""---
 name: {skill_name}
@@ -2694,15 +3193,29 @@ tags:
 """
 
         try:
-            with open(md_path, "w", encoding="utf-8") as f:
+            fd, tmp_path = tempfile.mkstemp(prefix='.SKILL.', suffix='.tmp', dir=skill_folder)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(frontmatter)
                 f.write(f"# {skill_name}\n\n")
                 f.write(f"> {description}\n\n")
+                f.write("## Evidence\n\n")
+                for evidence in evidence_manifest:
+                    f.write(f"- {str(evidence).strip()}\n")
+                f.write("\n")
                 f.write(sop_content)
+            os.replace(tmp_path, md_path)
                 
             yield f"成功创建技能SOP：{skill_name}\n"
-            return StepOutcome({"skill_name": skill_name}, next_prompt=f"技能 {skill_name} 已成功创建并存入 skills/local/{skill_name}/SKILL.md 目录")
+            return StepOutcome(
+                {"status": "ok", "skill_name": skill_name, "path": md_path, "discoverable": True},
+                next_prompt=f"技能 {skill_name} 已成功创建并存入 {md_path}",
+            )
         except Exception as e:
+            try:
+                if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
             yield f"创建技能发生错误：{e}\n"
             return StepOutcome(None, next_prompt=f"创建技能报错: {e}")
     def do_update_user_preference(self, args, response):

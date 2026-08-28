@@ -118,7 +118,8 @@ xiaohongshu-agent/
 ├── agentmain.py             # Agent 主入口
 ├── ga.py                    # 底层执行网关，封装 CDP 操作和工具路由
 ├── llmcore.py               # 大模型通信层（对接豆包全家桶）
-├── .env                     # 环境与防风控配置文件
+├── config.example.json      # 模型/API 配置模板（复制为本地 config.json）
+├── .env.example             # 浏览器操作节奏等运行时配置模板
 ├── reflect/
 │   └── autonomous.py        # 核心"大脑" Prompt：定义 Agent 的学习目标和冲浪纪律
 ├── skills/                  # 🌟 SkillHub 技能目录
@@ -151,16 +152,23 @@ source .venv/bin/activate
 # Windows:
 # .venv\Scripts\activate
 
-# 3) 一键安装所有依赖 (包括可视化界面和视频处理模块)
-pip install .
+# 3) 以 editable 模式安装（ga CLI 会从当前项目目录启动前端/脚本）
+pip install -e .
+
+# 如需使用新版终端 TUI / 桌面 GUI 等扩展前端，可安装：
+# pip install -e ".[ui]"
 ```
 
-### 2. 配置环境变量
+### 2. 配置模型 Key 与运行参数
 ```bash
+cp config.example.json config.json
 cp .env.example .env
 ```
-在 `.env` 中按需修改配置，灵活调整 Agent 的"手速"以规避风控：
-- `OPENAI_API_KEY`: 你的豆包大模型 API Key（[火山引擎控制台](https://www.volcengine.com/) 一键获取）
+先在 `config.json` 中填入模型配置：
+- `volc_apikey`: 你的火山引擎 API Key（[火山引擎控制台](https://www.volcengine.com/) 一键获取）
+- `volc_apibase` / `models`: 默认已填好，通常不用改
+
+再在 `.env` 中按需修改浏览器操作节奏，灵活调整 Agent 的"手速"以规避风控：
 - `INTERVAL`: 后台学习冲浪的触发频率（秒）
 - `ACTION_DELAY_MIN` / `MAX`: 模拟人类操作的随机停顿范围
 
@@ -172,17 +180,28 @@ cp .env.example .env
 
 ### 4. 启动 Agent
 
+推荐入口：
+
+| 场景 | 命令 | 说明 |
+|---|---|---|
+| Agent 工作台 | `ga studio` | 对话、行动流、浏览器观察、学习增量与收敛进度 |
+| Streamlit | `streamlit run frontends/stapp.py` | 兼容旧版 Web 界面 |
+| 终端 TUI | `ga tui` | 当前推荐终端入口（`frontends/tui_v3.py`） |
+| 轻量 CLI | `ga cli` | 最少依赖，直接进入命令行对话 |
+| 桌面壳 | `ga launch` | 使用 pywebview 包一层 Web UI |
+
+`ga tui` / `ga launch` 等扩展前端建议先安装 `pip install -e ".[ui]"`。`ga studio` 使用核心依赖即可运行。
+
 #### ✅ 方式 A：可视化界面（推荐）
-不想看终端黑框框？项目内置了清爽的 Web 可视化界面！
+启动后会自动打开浏览器。左侧用于对话和下发任务，右侧实时显示 Agent 正在做什么、正在看什么、学到了什么，以及是否达到研究收敛条件。
 ```bash
-streamlit run frontends/stapp.py
+ga studio
 ```
-*在浏览器弹出页面的左侧栏点击"开始空闲自主行动"，即可观看它沉浸式冲浪学习。*
 
 #### 🖥️ 方式 B：纯终端后台运行
 如果你不需要界面，只想让它在后台静默打工：
 ```bash
-python3 agentmain.py --reflect reflect/autonomous.py
+ga cli
 ```
 
 ---

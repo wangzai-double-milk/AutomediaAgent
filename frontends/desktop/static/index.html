@@ -1,64 +1,75 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>GenericAgent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoMedia Studio</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div id="app">
-    <!-- Main area -->
-    <main id="main">
+    <aside id="main" class="mission-dock" aria-label="任务对话">
       <header id="topbar">
+        <div class="brand-mark"><span>AM</span></div>
+        <div class="brand-copy">
+          <strong>AutoMedia</strong>
+          <small>你的 AI 运营搭档</small>
+        </div>
+        <button id="setup-entry" class="setup-entry" type="button" title="检查平台登录状态">
+          <i></i><span>平台</span>
+        </button>
         <div class="topbar-left">
-          <div id="session-list" class="tab-strip" role="tablist" aria-label="Chats">
-            <button id="new-session-btn" class="tab-new-btn" title="New chat" aria-label="New chat">
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14"/>
-              </svg>
-            </button>
+          <div id="session-list" class="tab-strip" role="tablist" aria-label="任务列表">
+            <button id="new-session-btn" class="tab-new-btn" title="新建任务" aria-label="新建任务">+</button>
           </div>
         </div>
         <div class="topbar-right">
-          <h1 id="session-title" class="sr-only">GenericAgent</h1>
+          <h1 id="session-title" class="sr-only">AutoMedia Studio</h1>
           <span id="status-badge" class="badge">
-            <span class="status-dot"></span>
-            <span id="status-text">Starting…</span>
+            <span class="status-dot"></span><span id="status-text">正在连接</span>
           </span>
         </div>
       </header>
 
       <div id="search-bar" class="search-bar hidden">
-        <input id="search-input" type="text" placeholder="Search messages…" aria-label="Search messages">
+        <input id="search-input" type="text" placeholder="搜索对话…" aria-label="搜索对话">
         <span id="search-count" class="search-count"></span>
-        <button id="search-prev" class="search-nav-btn" title="Previous (Shift+Enter)" aria-label="Previous match">▲</button>
-        <button id="search-next" class="search-nav-btn" title="Next (Enter)" aria-label="Next match">▼</button>
-        <button id="search-close" class="search-nav-btn" title="Close (Escape)" aria-label="Close search">✕</button>
+        <button id="search-prev" class="search-nav-btn" title="上一个">▲</button>
+        <button id="search-next" class="search-nav-btn" title="下一个">▼</button>
+        <button id="search-close" class="search-nav-btn" title="关闭">✕</button>
       </div>
 
       <section id="messages" class="empty">
         <div class="empty-state">
-          <div class="empty-title">New task</div>
-          <div class="empty-sub">Task me anything. Type <code>/help</code> for commands.</div>
+          <div class="empty-kicker">今天想让它研究什么？</div>
+          <div class="empty-title">给个目标，剩下的交给它</div>
+          <div class="empty-sub">它会自己搜索、刷内容、看素材，并把新发现讲给你听。</div>
+          <div class="starter-grid">
+            <button class="starter-card" data-prompt="调研小红书和抖音最近的内容趋势，持续看到没有新知识为止">
+              <span class="starter-icon">↗</span><strong>找近期趋势</strong><small>看看大家最近都在聊什么</small>
+            </button>
+            <button class="starter-card" data-prompt="分析我所在赛道的爆款内容，整理可复用的拍摄和文案方法">
+              <span class="starter-icon">✦</span><strong>拆解爆款</strong><small>学会高互动内容怎么做</small>
+            </button>
+            <button class="starter-card" data-prompt="检查当前任务目录的研究成果，告诉我学到了什么、还缺什么">
+              <span class="starter-icon">◎</span><strong>总结新发现</strong><small>用简单的话告诉我学到了什么</small>
+            </button>
+          </div>
         </div>
       </section>
 
       <div id="composer-wrap">
+        <div class="composer-label"><i></i> 和 Agent 说点什么</div>
         <div id="composer">
           <div id="image-previews" class="image-previews"></div>
-          <textarea id="input" rows="1" placeholder="Type a message, or /help"></textarea>
+          <input id="media-input" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" multiple hidden>
+          <textarea id="input" rows="1" placeholder="比如：帮我研究最近流行的减脂内容…"></textarea>
           <div class="composer-bottom">
             <div class="composer-hints">
-              <button id="settings-btn" class="icon-btn ghost" title="Settings" aria-label="Settings">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                  <circle cx="12" cy="12" r="3"/>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-                <span class="hint-label">Settings</span>
-              </button>
-
+              <button id="attach-btn" class="icon-btn ghost" title="上传图片或视频" aria-label="上传图片或视频">＋<span class="hint-label">素材</span></button>
+              <button id="settings-btn" class="icon-btn ghost" title="设置" aria-label="设置">⚙<span class="hint-label">设置</span></button>
             </div>
-            <button id="send-btn" class="send-btn" title="Send (Enter)">
+            <button id="send-btn" class="send-btn" title="发送">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14M13 6l6 6-6 6"/>
               </svg>
@@ -66,51 +77,210 @@
           </div>
         </div>
       </div>
+    </aside>
+
+    <main id="agent-live" class="agent-world" aria-label="Agent 实时工作现场">
+      <header class="world-head">
+        <div>
+          <span class="live-eyebrow">LIVE WORKSPACE</span>
+          <h2>看看它正在做什么</h2>
+        </div>
+        <div class="world-actions">
+          <div id="platform-mini" class="platform-mini" aria-label="平台状态">
+            <span data-platform-mini="xiaohongshu">小红书<i></i></span>
+            <span data-platform-mini="douyin">抖音<i></i></span>
+          </div>
+          <span id="live-state" class="live-state idle"><i></i><span>待命中</span></span>
+        </div>
+      </header>
+
+      <section class="agent-hero">
+        <div class="agent-presence">
+          <div class="agent-halo halo-one"></div>
+          <div class="agent-halo halo-two"></div>
+          <div class="agent-core">
+            <span class="core-eye"></span><span class="core-eye"></span>
+            <div class="core-wave"><i></i><i></i><i></i><i></i><i></i></div>
+          </div>
+          <span class="orbit-node node-xhs">RED</span>
+          <span class="orbit-node node-dy">DY</span>
+        </div>
+        <div class="agent-narration">
+          <span class="narration-kicker">它现在</span>
+          <h3 id="activity-title">等你安排任务</h3>
+          <p id="activity-detail">下达一个目标后，你会在这里看到它搜索、浏览和学习的全过程。</p>
+          <div class="thinking-line"><i></i><span id="agent-thought">准备好替你逛遍内容平台</span></div>
+        </div>
+        <div class="session-score">
+          <span>本轮进度</span>
+          <strong id="journey-percent">0%</strong>
+          <div><i id="journey-bar"></i></div>
+        </div>
+      </section>
+
+      <nav id="task-pipeline" class="task-pipeline" aria-label="任务阶段">
+        <span class="pipeline-empty">任务开始后，这里会显示从准备到交付的每一步</span>
+      </nav>
+
+      <section class="live-browser-wall">
+        <div class="wall-head">
+          <div><span class="card-kicker">LIVE BROWSER WALL</span><h3>它同时在看的页面</h3></div>
+          <div class="wall-controls">
+            <button class="wall-layout active" data-wall-layout="auto" type="button">自动</button>
+            <button class="wall-layout" data-wall-layout="grid" type="button">平铺</button>
+            <span id="wall-count">0 个窗口</span>
+          </div>
+        </div>
+        <div id="browser-wall" class="browser-wall empty">
+          <div class="wall-empty"><i></i><strong>浏览器画面会出现在这里</strong><span>小红书、抖音和普通网页可以同时展示</span></div>
+        </div>
+      </section>
+
+      <section class="creative-workbench">
+        <div class="focus-workspace">
+          <div class="focus-toolbar">
+            <div>
+              <span id="focus-role" class="focus-role">CURRENT OBJECT</span>
+              <strong id="focus-title">当前工作对象</strong>
+            </div>
+            <button id="focus-open" class="focus-open hidden" type="button">查看原帖 ↗</button>
+          </div>
+          <div id="focus-stage" class="focus-stage empty">
+            <div class="focus-placeholder">
+              <div class="focus-shapes"><i></i><i></i><i></i></div>
+              <strong>中间过程会出现在这里</strong>
+              <span>参考帖子、原始素材、改图版本和待发布内容都会自动汇集</span>
+            </div>
+          </div>
+          <div id="focus-caption" class="focus-caption">
+            <span>等待任务</span><p>Agent 一有新的工作对象，这里会自动切换。</p>
+          </div>
+        </div>
+
+        <aside class="asset-rail" aria-label="任务中间产物">
+          <div class="asset-tabs" role="tablist">
+            <button class="asset-tab active" data-workspace-tab="references" type="button">参考帖 <b id="reference-count">0</b></button>
+            <button class="asset-tab" data-workspace-tab="assets" type="button">素材版本 <b id="asset-count">0</b></button>
+            <button class="asset-tab" data-workspace-tab="documents" type="button">文案/报告 <b id="document-count">0</b></button>
+          </div>
+          <div id="reference-gallery" class="asset-gallery active" data-workspace-panel="references">
+            <div class="gallery-empty">Agent 浏览和分析过的帖子会留在这里</div>
+          </div>
+          <div id="asset-gallery" class="asset-gallery" data-workspace-panel="assets">
+            <div class="gallery-empty">原图、改图版本和待发布素材会留在这里</div>
+          </div>
+          <div id="document-gallery" class="asset-gallery document-gallery" data-workspace-panel="documents">
+            <div class="gallery-empty">文案草稿、标签和研究报告会留在这里</div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="draft-preview" class="draft-preview hidden">
+        <div class="draft-status"><i></i><span>发布准备中</span></div>
+        <div class="draft-copy">
+          <span>准备发布的小红书笔记</span>
+          <h3 id="draft-title">标题还在生成</h3>
+          <p id="draft-desc">正文将在这里实时出现。</p>
+          <div id="draft-tags" class="draft-tags"></div>
+        </div>
+        <div class="draft-meta">
+          <span id="draft-visibility">等待确认可见范围</span>
+          <strong id="draft-image-count">0 张图</strong>
+        </div>
+      </section>
+
+      <div class="world-bottom">
+        <section class="journey-card">
+          <div class="card-head">
+            <div><span class="card-kicker">WORKING STORY</span><h3>它刚刚做了什么</h3></div>
+            <span class="story-live"><i></i> 实时更新</span>
+          </div>
+          <div id="activity-timeline" class="activity-timeline">
+            <div class="timeline-empty">开始任务后，这里会像故事一样记录每一步</div>
+          </div>
+        </section>
+        <section class="learning-card compact-learning">
+          <div class="card-head">
+            <div><span class="card-kicker">WHAT CHANGED</span><h3>这一步带来了什么</h3></div>
+            <span id="knowledge-count" class="soft-count">0 条新发现</span>
+          </div>
+          <div id="knowledge-list" class="knowledge-list">
+            <div class="knowledge-empty"><span>✦</span><strong>等待新的发现</strong><small>新洞察和修改理由会出现在这里</small></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="browser-strip">
+        <div class="browser-strip-head"><span>Agent 当前打开的页面</span><b id="browser-count">0 个页面</b></div>
+        <div id="browser-lens" class="browser-lens compact">
+          <div class="lens-empty"><strong>暂时没有平台页面</strong></div>
+        </div>
+      </section>
+
+      <div class="friendly-metrics telemetry-hidden" aria-hidden="true">
+        <strong id="convergence-status">等待出发</strong><span id="convergence-copy"></span>
+        <div><strong id="metric-search">0/2</strong><i><b id="bar-search"></b></i></div>
+        <div><strong id="metric-read">0/5</strong><i><b id="bar-read"></b></i></div>
+        <div><strong id="metric-nonew">0/5</strong><i><b id="bar-nonew"></b></i></div>
+        <div><strong id="metric-media">0</strong><i><b id="bar-media"></b></i></div>
+      </div>
     </main>
 
-    <!-- Settings modal -->
-    <div id="settings-modal" class="modal hidden">
-      <div class="modal-backdrop"></div>
-      <div class="modal-body">
-        <div class="modal-header">
-          <h2>Settings</h2>
-          <button class="icon-btn ghost" id="close-settings">✕</button>
-        </div>
-        <div class="modal-content">
-          <div class="form-row">
-            <label for="cfg-llm">Model</label>
-            <select id="cfg-llm">
-              <option value="0">Default / Auto</option>
-            </select>
-            <small>Select the LLM profile from mykey.py.</small>
-          </div>
-          <div class="form-row">
-            <label>API keys</label>
-            <div class="btn-row">
-              <button class="btn" id="open-mykey">Open mykey.py</button>
+    <div id="setup-gate" class="setup-gate" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <div class="setup-panel">
+        <button id="setup-close" class="setup-close" type="button" aria-label="稍后设置">×</button>
+        <div class="setup-badge">开工前准备 · 约 1 分钟</div>
+        <h2 id="setup-title">先让 Agent 认得你的账号</h2>
+        <p class="setup-lead">Agent 需要在已经登录的平台页面中浏览和工作。账号密码只留在浏览器里，Studio 不会保存。</p>
+        <div class="platform-checks">
+          <article class="platform-check xhs" data-platform-card="xiaohongshu">
+            <div class="platform-logo">小红书</div>
+            <div class="platform-copy">
+              <strong>小红书</strong><span data-platform-detail>正在检查浏览器…</span>
             </div>
-            <small>Configure API keys in <code>mykey.py</code> at the GA project root.</small>
-          </div>
+            <span class="platform-state checking" data-platform-state>检查中</span>
+            <button class="platform-open" type="button" data-platform-open="xiaohongshu">打开并登录</button>
+          </article>
+          <article class="platform-check douyin" data-platform-card="douyin">
+            <div class="platform-logo">抖音</div>
+            <div class="platform-copy">
+              <strong>抖音</strong><span data-platform-detail>正在检查浏览器…</span>
+            </div>
+            <span class="platform-state checking" data-platform-state>检查中</span>
+            <button class="platform-open" type="button" data-platform-open="douyin">打开并登录</button>
+          </article>
         </div>
-        <div class="modal-footer">
-          <button class="btn ghost" id="cancel-settings">Cancel</button>
-          <button class="btn primary" id="save-settings">Save</button>
+        <div class="privacy-note"><span>✓</span><p><strong>登录由你亲自完成</strong><br>Agent 只读取已登录页面，不接触也不存储密码。</p></div>
+        <div class="setup-actions">
+          <button id="setup-refresh" class="btn ghost" type="button">我已登录，重新检查</button>
+          <button id="setup-continue" class="btn primary" type="button">开始使用</button>
         </div>
+        <small id="setup-hint">建议两个平台都显示“已就绪”后再开始跨平台任务。</small>
       </div>
     </div>
 
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-backdrop"></div>
+      <div class="modal-body">
+        <div class="modal-header"><h2>设置</h2><button class="icon-btn ghost" id="close-settings">✕</button></div>
+        <div class="modal-content">
+          <div class="form-row"><label for="cfg-llm">模型</label><select id="cfg-llm"><option value="0">默认 / 自动</option></select><small>选择 Agent 使用的大模型。</small></div>
+          <div class="form-row"><label>API 配置</label><div class="btn-row"><button class="btn" id="open-mykey">打开 mykey.py</button></div><small>模型 API Key 保存在本机配置中。</small></div>
+        </div>
+        <div class="modal-footer"><button class="btn ghost" id="cancel-settings">取消</button><button class="btn primary" id="save-settings">保存</button></div>
+      </div>
+    </div>
 
-
-    <!-- Error banner -->
     <div id="error-banner" class="error-banner hidden">
-      <span id="error-text"></span>
-      <button class="icon-btn ghost" id="error-action"></button>
-      <button class="icon-btn ghost" id="error-dismiss">✕</button>
+      <span id="error-text"></span><button class="icon-btn ghost" id="error-action"></button><button class="icon-btn ghost" id="error-dismiss">✕</button>
+    </div>
+    <div id="drop-overlay" class="drop-overlay hidden">
+      <div><strong>把素材放到这里</strong><span>支持图片、MP4、MOV 和 WebM，单文件最大 500MB</span></div>
     </div>
   </div>
 
   <script src="vendor/marked.min.js"></script>
-  <script src="ga-web.js?v=14168-2"></script>
-  <script src="app.js?v=poll-fold-7"></script>
+  <script src="ga-web.js?v=14168-3"></script>
+  <script src="app.js?v=agent-world-4"></script>
 </body>
 </html>

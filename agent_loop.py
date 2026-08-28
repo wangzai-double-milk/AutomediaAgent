@@ -15,6 +15,13 @@ except ImportError:
         @staticmethod
         def get_schemas(): return []
 
+TERMINAL_COMPLETED = 'COMPLETED'
+TERMINAL_WAITING_USER = 'WAITING_USER'
+TERMINAL_MAX_TURNS = 'MAX_TURNS'
+TERMINAL_ABORTED = 'ABORTED'
+TERMINAL_FAILED = 'FAILED'
+
+
 @dataclass
 class StepOutcome:
     data: Any
@@ -68,7 +75,9 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": initial_user_content if initial_user_content is not None else user_input}
     ]
-    turn = 0;  handler.max_turns = max_turns
+    turn = 0
+    exit_reason = {}
+    handler.max_turns = max_turns
     _hook('agent_before', locals())
     while turn < handler.max_turns:
         turn += 1; turnstr = f'LLM Running (Turn {turn}) ...'
@@ -110,24 +119,36 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
                 if verbose: yield '`````\n'
             except StopIteration as e: outcome = e.value
             
-            if outcome.should_exit: 
-                exit_reason = {'result': 'EXITED', 'data': outcome.data}; break
+            if outcome.should_exit:
+                exit_reason = {'result': TERMINAL_WAITING_USER, 'data': outcome.data}; break
             if not outcome.next_prompt: 
-                exit_reason = {'result': 'CURRENT_TASK_DONE', 'data': outcome.data}; break
+                exit_reason = {'result': TERMINAL_COMPLETED, 'data': outcome.data}; break
             if outcome.next_prompt.startswith('未知工具'): client.last_tools = ''
             if outcome.data is not None and tool_name != 'no_tool': 
                 datastr = json.dumps(outcome.data, ensure_ascii=False, default=json_default) if type(outcome.data) in [dict, list] else str(outcome.data) 
                 tool_results.append({'tool_use_id': tid, 'content': datastr})
             next_prompts.add(outcome.next_prompt)
         if len(next_prompts) == 0 or exit_reason:
-            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == 'EXITED': break
+            if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == TERMINAL_WAITING_USER: break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
         _hook('turn_after', locals())
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
     _hook('agent_after', locals())
-    return exit_reason or {'result': 'MAX_TURNS_EXCEEDED'}
+    return exit_reason or {'result': TERMINAL_MAX_TURNS}
+
+
+def iter_agent_chunks(gen, should_abort):
+    """Yield stream chunks while preserving the wrapped generator's return value."""
+    while True:
+        if should_abort():
+            gen.close()
+            return {'result': TERMINAL_ABORTED}
+        try:
+            yield next(gen)
+        except StopIteration as exc:
+            return exc.value or {'result': TERMINAL_COMPLETED}
 
 def _clean_content(text):
     if not text: return ''

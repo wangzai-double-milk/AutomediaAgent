@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest -q
+      - run: python -m build
+      - name: Verify wheel contents
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel = glob.glob("dist/*.whl")[0]
+          required = {
+              "agent_loop.py",
+              "agentmain.py",
+              "ga.py",
+              "llmcore.py",
+              "TMWebDriver.py",
+              "tools/convergence.py",
+              "tools/image.py",
+              "assets/tools_schema.json",
+              "skills/hard_skills/agent_core/SKILL.md",
+          }
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"wheel missing required files: {missing}")
+          print(f"verified {wheel}: {len(names)} files")
+          PY

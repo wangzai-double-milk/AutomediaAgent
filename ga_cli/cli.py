@@ -24,6 +24,9 @@ def launch_frontend(cmd_parts, args=None):
     """启动前端/工具进程"""
     full_cmd = []
     for part in cmd_parts:
+        # 用当前解释器替换硬编码的 "python"，兼容仅有 python3/.venv 的环境
+        if part == "python":
+            part = sys.executable or "python3"
         part = part.replace("{PROJECT_DIR}", PROJECT_DIR)
         part = part.replace("{FRONTENDS}", _frontends())
         part = part.replace("{REFLECT}", _reflect())
@@ -45,6 +48,11 @@ def launch_frontend(cmd_parts, args=None):
 
 
 COMMANDS = {
+    "studio": {
+        "help": "启动 AutoMedia 可视化工作台（推荐）",
+        "desc": "启动对话、行动流、浏览器观察和学习增量一体化界面",
+        "cmd": ["python", "{FRONTENDS}/studio.py"],
+    },
     "gui": {
         "help": "启动桌面GUI (qtapp)",
         "desc": "启动基于 PyQt5 的完整桌面聊天界面（气泡代码高亮、文件拖拽、历史搜索）",
@@ -61,8 +69,13 @@ COMMANDS = {
         "cmd": ["python", "{PROJECT_DIR}/hub.pyw"],
     },
     "tui": {
-        "help": "启动终端 TUI (tuiapp)",
-        "desc": "启动终端图形界面（Textual），适合纯终端环境或 SSH",
+        "help": "启动终端 TUI (tui_v3，推荐)",
+        "desc": "启动当前推荐的 scrollback-first 终端界面，适合纯终端环境或 SSH",
+        "cmd": ["python", "{FRONTENDS}/tui_v3.py"],
+    },
+    "tui1": {
+        "help": "启动旧版终端 TUI v1 (tuiapp)",
+        "desc": "启动旧版 Textual 终端图形界面，保留用于兼容排障",
         "cmd": ["python", "{FRONTENDS}/tuiapp.py"],
     },
     "tui2": {
@@ -154,11 +167,11 @@ def main():
         epilog=textwrap.dedent("""\
             示例:
               ga gui               启动桌面 GUI
-              ga web               启动 Web 增强版
-              ga web --native      启动 Web 基础版(桌面壳)
-              ga tui               启动终端 TUI (v1)
-              ga tui2              启动终端 TUI (v2 增强版)
-              ga pet               启动桌面宠物 v2
+              ga studio            启动 AutoMedia 可视化工作台
+              ga tui               启动推荐终端 TUI (v3)
+              ga tui1              启动旧版终端 TUI (v1)
+              ga tui2              启动旧版终端 TUI (v2)
+              ga cli               启动最轻量命令行交互
               ga launch            启动 webview 桌面壳
               ga list              列出所有命令
         """),

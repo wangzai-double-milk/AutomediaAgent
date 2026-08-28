@@ -40,6 +40,46 @@
   {
     "type": "function",
     "function": {
+      "name": "record_research_delta",
+      "description": "深读每一条研究样本后记录它是否给现有报告带来了新知识或修正。必须按真实样本逐条记录，重复样本不能重复计数。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "description": "样本唯一 ID 或稳定 URL"
+          },
+          "platform": {
+            "type": "string",
+            "description": "样本平台，如 xiaohongshu、douyin、bilibili、web"
+          },
+          "has_new": {
+            "type": "boolean",
+            "description": "是否产生了真正的新知识、修正或矛盾"
+          },
+          "new_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "本样本新增的知识点；没有则传空数组"
+          },
+          "revised_points": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "本样本修正或推翻的既有结论；没有则传空数组"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "支撑增量判断的来源引用"
+          }
+        },
+        "required": ["item_id", "platform", "has_new", "new_points", "revised_points"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "file_read",
       "description": "读取文件内容。建议在修改文件前先读取，以确保获取最新的上下文和行号。支持分页读取或关键字搜索",
       "parameters": {
@@ -308,7 +348,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_review",
-      "description": "小红书美食封面/配图严格档审核（豆包 VLM 毒舌评判官）。⚠️【强约束】调用前必须先在小红书搜同品类爆款封面并把本地路径放进 reference_images——这是【硬要求】，因为审图依赖与爆款的对比（viral_patterns、gaps_vs_viral、roast 字段都靠它生成）。完整流程见 skills/hard_skills/xhs_main/SKILL.md。返回字段：verdict (PASS|REWORK|REPHOTO) / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / annotation_prompts / roast / title_hints / summary。**不输出评分数字**，只做三档判定 + 毒舌点评 + 修图/重拍指引。",
+      "description": "小红书美食封面/配图严格档审核（豆包 VLM 毒舌评判官）。⚠️【强约束】调用前必须先在小红书搜同品类爆款封面并把本地路径放进 reference_images——这是【硬要求】，因为审图依赖与爆款的对比（viral_patterns、gaps_vs_viral、roast 字段都靠它生成）。完整流程见 skills/hard_skills/xhs_review/SKILL.md。返回字段：verdict (PASS|REWORK|REPHOTO) / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / annotation_prompts / roast / title_hints / summary。**不输出评分数字**，只做三档判定 + 毒舌点评 + 修图/重拍指引。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -338,7 +378,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_edit",
-      "description": "调豆包 Seedream 4.5 图生图（i2i）。原子能力：输入原图 + 修图话术（多条自动合并），返回保存后的本地路径。两大用法：(A) 修图美化（按 review.edit_prompts）；(B) 在原图上【画批注】教用户怎么拍——例：'在原图主菜上方用红色箭头标注\"加蒸汽\"，左下角标注\"加葱花点缀\"'。多轮编排见 skills/hard_skills/xhs_main/SKILL.md（≥2 轮未通过须强制降级 REPHOTO）",
+      "description": "调豆包 Seedream 4.5 图生图（i2i）。原子能力：输入原图 + 修图话术（多条自动合并），返回保存后的本地路径。两大用法：(A) 修图美化（按 review.edit_prompts）；(B) 在原图上【画批注】教用户怎么拍——例：'在原图主菜上方用红色箭头标注\"加蒸汽\"，左下角标注\"加葱花点缀\"'。多轮编排见 skills/hard_skills/xhs_review/SKILL.md（≥2 轮未通过须强制降级 REPHOTO）",
       "parameters": {
         "type": "object",
         "properties": {
@@ -796,12 +836,24 @@
           "sop_content": {
             "type": "string",
             "description": "技能的 Markdown 格式的 SOP 内容，包含规则、prompt模板、操作步骤等"
+          },
+          "evidence_manifest": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "支撑该技能的可追溯证据列表，至少一条，包含来源平台、样本ID/URL和验证状态"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "是否明确覆盖已有同名技能，默认 false"
           }
         },
         "required": [
           "skill_name",
           "description",
-          "sop_content"
+          "sop_content",
+          "evidence_manifest"
         ]
       }
     }

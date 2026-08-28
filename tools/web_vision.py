@@ -687,7 +687,10 @@ def _page_fingerprint() -> dict:
 def _fp_changed(before: dict, after: dict) -> bool:
     """对比两次指纹是否有"有意义的变化"：URL 变 / 节点数变 / 文本长度变 / 弹层数变。"""
     if not before or not after:
-        return True  # 抓不到指纹时不误判为"没反应"，保守放行
+        return False
+    required = ('url', 'nodes', 'textlen', 'popups')
+    if before.get('err') or after.get('err') or any(k not in before or k not in after for k in required):
+        return False
     if before.get('url') != after.get('url'):
         return True
     if before.get('popups') != after.get('popups'):

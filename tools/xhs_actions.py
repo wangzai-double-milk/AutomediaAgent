@@ -368,6 +368,55 @@ def _wait_selector(sel, timeout=6.0):
     return False
 
 
+def _wait_interact_state(feed_id, kind, target, timeout=6.0):
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        liked, collected = _read_interact_state(feed_id)
+        last = liked if kind == 'like' else collected
+        if last is not None and last == target:
+            return True, last
+        time.sleep(0.4)
+    return False, last
+
+
+def _comment_occurrences(content):
+    """Count rendered comments/replies containing the submitted text."""
+    js = r"""
+    (function(){
+      var target = %s;
+      var selectors = [
+        '.comment-item', '.parent-comment', '.comment-inner-container',
+        '[class*="comment-item"]', '[class*="reply-item"]'
+      ];
+      var seen = new Set(), count = 0;
+      document.querySelectorAll(selectors.join(',')).forEach(function(el){
+        if(seen.has(el)) return;
+        seen.add(el);
+        var text = (el.innerText || el.textContent || '').trim();
+        if(text.indexOf(target) >= 0) count++;
+      });
+      return JSON.stringify(count);
+    })()
+    """ % json.dumps(str(content))
+    value = _exec_json(js)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _wait_comment_visible(content, before_count, timeout=8.0):
+    deadline = time.time() + timeout
+    last = before_count
+    while time.time() < deadline:
+        last = _comment_occurrences(content)
+        if last is not None and before_count is not None and last > before_count:
+            return True, last
+        time.sleep(0.5)
+    return False, last
+
+
 def like_feed(feed_id, xsec_token, unlike=False, xsec_source='pc_feed'):
     """点赞/取消点赞。先读状态，已是目标态则跳过；点击后校验。"""
     return _toggle_interact(feed_id, xsec_token, target=not unlike,
@@ -403,19 +452,16 @@ def _toggle_interact(feed_id, xsec_token, target, selector, kind, xsec_source='p
         hit = _click_selector(selector)
     if not hit:
         return {'ok': False, 'selector_hit': False, 'reason': f'selector 未命中: {selector}'}
-    time.sleep(2.5)
-
-    liked2, collected2 = _read_interact_state(feed_id)
-    new = liked2 if kind == 'like' else collected2
-    if new is not None and new == target:
+    verified, new = _wait_interact_state(feed_id, kind, target)
+    if verified:
         return {'ok': True, 'state': new, 'selector_hit': True, 'verified': True}
-    # 再点一次兜底
-    _click_selector(selector)
-    time.sleep(2.0)
-    liked3, collected3 = _read_interact_state(feed_id)
-    new = liked3 if kind == 'like' else collected3
-    return {'ok': bool(new == target), 'state': new, 'selector_hit': True,
-            'verified': bool(new == target)}
+    return {
+        'ok': False,
+        'state': new,
+        'selector_hit': True,
+        'verified': False,
+        'reason': '已点击一次，但状态在等待窗口内未变为目标值；为避免二次 toggle，未重复点击',
+    }
 
 
 def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
@@ -426,6 +472,7 @@ def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
     block = _check_accessible()
     if block:
         return {'ok': False, 'reason': block, 'blocked': True}
+    before_count = _comment_occurrences(content)
 
     # 1. 点开输入框（先等渲染）
     if not _wait_selector(SELECTORS['comment_input_box']):
@@ -441,8 +488,16 @@ def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
     # 3. 提交
     if not _click_selector(SELECTORS['comment_submit']):
         return {'ok': False, 'selector_hit': False, 'reason': '未找到提交按钮'}
-    time.sleep(1.5)
-    return {'ok': True, 'selector_hit': True, 'feed_id': feed_id}
+    verified, after_count = _wait_comment_visible(content, before_count)
+    return {
+        'ok': verified,
+        'selector_hit': True,
+        'verified': verified,
+        'feed_id': feed_id,
+        'reason': '' if verified else '提交按钮已点击，但未在评论 DOM 中观察到新增内容',
+        'comment_matches_before': before_count,
+        'comment_matches_after': after_count,
+    }
 
 
 def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_source='pc_feed'):
@@ -455,6 +510,7 @@ def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_
     block = _check_accessible()
     if block:
         return {'ok': False, 'reason': block, 'blocked': True}
+    before_count = _comment_occurrences(content)
 
     # 滚动加载并定位目标评论的回复按钮
     found = _locate_and_click_reply(comment_id, user_id)
@@ -466,9 +522,18 @@ def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_
     time.sleep(0.6)
     if not _click_selector(SELECTORS['comment_submit']):
         return {'ok': False, 'selector_hit': False, 'reason': '未找到提交按钮'}
-    time.sleep(1.5)
-    return {'ok': True, 'selector_hit': True, 'feed_id': feed_id,
-            'comment_id': comment_id, 'user_id': user_id}
+    verified, after_count = _wait_comment_visible(content, before_count)
+    return {
+        'ok': verified,
+        'selector_hit': True,
+        'verified': verified,
+        'feed_id': feed_id,
+        'comment_id': comment_id,
+        'user_id': user_id,
+        'reason': '' if verified else '提交按钮已点击，但未在回复 DOM 中观察到新增内容',
+        'comment_matches_before': before_count,
+        'comment_matches_after': after_count,
+    }
 
 
 def _input_into(sel, content):

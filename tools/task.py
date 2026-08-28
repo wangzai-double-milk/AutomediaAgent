@@ -12,14 +12,25 @@ import re
 import json
 import time
 import shutil
+import uuid
+from contextvars import ContextVar
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, '..'))
 TASKS_ROOT = os.path.join(_PROJECT_ROOT, 'tasks')
 os.makedirs(TASKS_ROOT, exist_ok=True)
 
-# 当前活跃 task_dir（init_task 时设置，供后续工具自动写 trace 用）
+# 兼容旧调用方/测试的进程级回退值。正常运行使用 ContextVar，避免同一进程内
+# 多个 Agent 线程互相覆盖当前任务。
 _CURRENT_TASK_DIR = None
+_CURRENT_TASK_DIR_CTX = ContextVar('ga_current_task_dir', default=None)
+
+
+def set_current(task_dir: str = None) -> None:
+    """绑定当前执行上下文的 task_dir；不会影响其他线程/async context。"""
+    global _CURRENT_TASK_DIR
+    _CURRENT_TASK_DIR = task_dir
+    _CURRENT_TASK_DIR_CTX.set(task_dir)
 
 
 def _slugify(text: str, maxlen: int = 32) -> str:
@@ -30,10 +41,9 @@ def _slugify(text: str, maxlen: int = 32) -> str:
 
 def init_task(user_request: str, image: str = None) -> dict:
     """新建任务工作区，返回 {task_dir, original_image, task_name}。"""
-    global _CURRENT_TASK_DIR
     ts = time.strftime('%Y%m%d-%H%M%S')
     slug = _slugify(user_request, 24) or 'task'
-    task_name = f'{ts}_{slug}'
+    task_name = f'{ts}_{slug}_{uuid.uuid4().hex[:8]}'
     task_dir = os.path.join(TASKS_ROOT, task_name)
     os.makedirs(task_dir, exist_ok=True)
     os.makedirs(os.path.join(task_dir, 'viral_refs'), exist_ok=True)
@@ -44,7 +54,7 @@ def init_task(user_request: str, image: str = None) -> dict:
         original_image = os.path.join(task_dir, f'original{ext}')
         shutil.copyfile(image, original_image)
 
-    _CURRENT_TASK_DIR = task_dir
+    set_current(task_dir)
     info = {
         'task_dir': task_dir,
         'original_image': original_image,
@@ -56,7 +66,7 @@ def init_task(user_request: str, image: str = None) -> dict:
 
 def get_current() -> str:
     """返回当前活跃的 task_dir，None = 还没 init。"""
-    return _CURRENT_TASK_DIR
+    return _CURRENT_TASK_DIR_CTX.get() or _CURRENT_TASK_DIR
 
 
 def ensure_task(hint: str = '') -> str:
@@ -65,22 +75,22 @@ def ensure_task(hint: str = '') -> str:
     用于 web_visual_* 这类不走 xhs_task_init 的探索/兜底操作，让它们的过程也能落盘 trace。
     返回当前 task_dir。
     """
-    global _CURRENT_TASK_DIR
-    if _CURRENT_TASK_DIR and os.path.isdir(_CURRENT_TASK_DIR):
-        return _CURRENT_TASK_DIR
+    current = get_current()
+    if current and os.path.isdir(current):
+        return current
     ts = time.strftime('%Y%m%d-%H%M%S')
     slug = _slugify(hint, 24) or 'explore'
-    task_name = f'{ts}_explore_{slug}'
+    task_name = f'{ts}_explore_{slug}_{uuid.uuid4().hex[:8]}'
     task_dir = os.path.join(TASKS_ROOT, task_name)
     os.makedirs(task_dir, exist_ok=True)
-    _CURRENT_TASK_DIR = task_dir
+    set_current(task_dir)
     append_trace('explore_task_init', {'hint': hint, 'task_dir': task_dir, 'task_name': task_name})
     return task_dir
 
 
 def append_trace(step: str, payload, task_dir: str = None) -> None:
     """向 task_dir/trace.log 追加一条记录。task_dir 默认用当前活跃的。"""
-    target = task_dir or _CURRENT_TASK_DIR
+    target = task_dir or get_current()
     if not target or not os.path.isdir(target):
         return  # 没 init 就静默跳过，不破坏 GA 主流程
     line = json.dumps({

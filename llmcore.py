@@ -40,19 +40,58 @@ SKILL_DOC_OPEN = '<skill_doc>'
 SKILL_DOC_CLOSE = '</skill_doc>'
 # 模型输出默认上限：至少 16K，避免"卡输出"/过早断。config 里显式配 max_tokens 时以配置为准。
 DEFAULT_MAX_OUTPUT_TOKENS = 16384
+# 历史段落压缩阈值：单段超过此长度才压缩（36K 字），低于不动。被 <skill_doc> 包裹的技能文档整体豁免。
+HISTORY_COMPRESS_THRESHOLD = 36000
+# 单次 trim 内最多做几段 LLM 压缩，超出的段落回退头尾截断，避免一轮里发起过多 LLM 往返。
+_LLM_COMPRESS_BUDGET = 4
 
-def compress_history_tags(messages, keep_recent=10, max_len=16000, force=False, interval=5):
+def _llm_compress_segment(text, sess, target_len):
+    """用大模型把超长历史段落压缩到 target_len 左右；任何失败都回退到头尾截断，绝不抛出。
+    优先用 sess.compress_cfg 指定的轻量模型；没配则用当前 sess 自身。走 raw_ask 底层裸调用，
+    不碰 history、不获取 sess.lock（trim 已在 lock 内，raw_ask 无锁，故不会死锁）。"""
+    def _fallback():
+        h = max(200, target_len // 2)
+        return text[:h] + '\n...[Truncated]...\n' + text[-h:]
+    try:
+        prompt = (
+            "下面是 AI agent 对话历史里的一段超长内容。请在**完整保留**关键事实、数字、文件路径、"
+            "URL、结论、待办事项、报错信息的前提下，压缩成简洁中文要点，"
+            f"控制在 {target_len} 字以内。只输出压缩后的要点，不要加任何解释或评论：\n\n" + text)
+        cfg_name = getattr(sess, 'compress_cfg', None)
+        if cfg_name:
+            out = fast_ask(prompt, cfg_name)
+        elif sess is not None and hasattr(sess, 'raw_ask'):
+            out = ''.join(sess.raw_ask([{"role": "user", "content": prompt}]))
+        else:
+            return _fallback()
+        out = (out or '').strip()
+        if out and not out.startswith('!!!Error') and len(out) < len(text):
+            return f'\n...[压缩]\n{out}\n'
+        return _fallback()
+    except Exception as e:
+        print(f'[Compress] LLM 压缩失败，回退截断: {e}')
+        return _fallback()
+
+def compress_history_tags(messages, keep_recent=10, max_len=HISTORY_COMPRESS_THRESHOLD, force=False, interval=5, sess=None):
     """Compress <thinking>/<tool_use>/<tool_result> tags in older messages to save tokens.
-    16K 以下的段落不压缩；被 <skill_doc> 包裹的技能文档整体豁免。"""
-    compress_history_tags._cd = getattr(compress_history_tags, '_cd', 0) + 1
-    if force: compress_history_tags._cd = 0
-    if compress_history_tags._cd % interval != 0: return messages
+    超过 max_len(默认 36K) 的段落才压缩，优先调用大模型压缩、失败回退头尾截断；
+    低于阈值的段落不动；被 <skill_doc> 包裹的技能文档整体豁免。"""
+    owner = sess if sess is not None else compress_history_tags
+    cd = getattr(owner, '_history_compress_cd', 0) + 1
+    if force:
+        cd = 0
+    owner._history_compress_cd = cd
+    if cd % interval != 0: return messages
     _before = sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
     _pats = {tag: re.compile(rf'(<{tag}>)([\s\S]*?)(</{tag}>)') for tag in ('thinking', 'think', 'tool_use', 'tool_result')}
     _hist_pat = re.compile(r'<(history|key_info|earlier_context)>[\s\S]*?</\1>')
+    _budget = [_LLM_COMPRESS_BUDGET]  # 闭包可变计数，控制本轮 LLM 压缩次数
     def _trunc_str(s):
         if not isinstance(s, str) or len(s) <= max_len: return s
-        if SKILL_DOC_OPEN in s: return s  # 技能文档整体不压缩
+        if SKILL_DOC_OPEN in s: return s  # 技能文档整体不压缩（唯一豁免；其他内容可重复压缩，压短后自然低于阈值）
+        if sess is not None and _budget[0] > 0:
+            _budget[0] -= 1
+            return _llm_compress_segment(s, sess, max_len // 2)
         return s[:max_len//2] + '\n...[Truncated]...\n' + s[-max_len//2:]
     def _trunc(text):
         if isinstance(text, str) and SKILL_DOC_OPEN in text: return text  # 技能文档整体不压缩
@@ -119,22 +158,98 @@ def _msg_has_skill_doc(msg):
                     if isinstance(sub, dict) and _hit(sub.get('text')): return True
     return False
 
+
+def _compact_skill_doc_message(msg, max_chars):
+    """Emergency compaction used only after the total context exceeds its cap."""
+    def compact(value):
+        if not isinstance(value, str) or SKILL_DOC_OPEN not in value or len(value) <= max_chars:
+            return value
+        keep = max(500, (max_chars - 120) // 2)
+        return (
+            SKILL_DOC_OPEN
+            + value[:keep].replace(SKILL_DOC_OPEN, '')
+            + '\n...[旧技能文档因上下文硬上限被截断]...\n'
+            + value[-keep:].replace(SKILL_DOC_CLOSE, '')
+            + SKILL_DOC_CLOSE
+        )
+
+    content = msg.get('content')
+    if isinstance(content, str):
+        msg['content'] = compact(content)
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if isinstance(block.get('text'), str):
+                block['text'] = compact(block['text'])
+            tool_content = block.get('content')
+            if isinstance(tool_content, str):
+                block['content'] = compact(tool_content)
+            elif isinstance(tool_content, list):
+                for sub in tool_content:
+                    if isinstance(sub, dict) and isinstance(sub.get('text'), str):
+                        sub['text'] = compact(sub['text'])
+
+
+def _hard_compact_message(msg, max_chars):
+    """Last-resort per-string truncation so even recent giant messages respect the cap."""
+    def compact(value):
+        if not isinstance(value, str) or len(value) <= max_chars:
+            return value
+        keep = max(300, (max_chars - 60) // 2)
+        return value[:keep] + '\n...[context hard limit]...\n' + value[-keep:]
+
+    content = msg.get('content')
+    if isinstance(content, str):
+        msg['content'] = compact(content)
+    elif isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            for key in ('text', 'content'):
+                if isinstance(block.get(key), str):
+                    block[key] = compact(block[key])
+            if isinstance(block.get('content'), list):
+                for sub in block['content']:
+                    if isinstance(sub, dict) and isinstance(sub.get('text'), str):
+                        sub['text'] = compact(sub['text'])
+
+
 def trim_messages_history(history, sess):
     cap = sess.context_win * 3
     target = int(cap * getattr(sess, 'trim_keep_rate', 0.6))
     def cost(): return sum(len(json.dumps(m, ensure_ascii=False)) for m in history)
-    compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5))
+    compress_history_tags(history, interval=getattr(sess, 'cut_msg_interval', 5), sess=sess)
     print(f'[Debug] Current context: {cost()} chars, {len(history)} messages.')
     if cost() <= cap: return
-    compress_history_tags(history, keep_recent=4, force=True)
+    compress_history_tags(history, keep_recent=4, force=True, sess=sess)
     if cost() <= target: return
     while len(history) > 9 and cost() > target:
-        # 从最旧的消息开始删；但含技能文档(<skill_doc>)的消息永久保留，绝不删除。
+        # 常规裁剪优先保护技能文档，从最旧的普通消息开始删。
         victim = next((i for i, m in enumerate(history) if not _msg_has_skill_doc(m)), None)
-        if victim is None: break  # 剩下的全是受保护技能文档，停止裁剪
+        if victim is None:
+            break
         history.pop(victim)
         while history and history[0].get('role') != 'user' and not _msg_has_skill_doc(history[0]): history.pop(0)
         if history and history[0].get('role') == 'user': history[0] = _sanitize_leading_user_msg(history[0])
+
+    # 技能文档不是突破模型 context window 的理由。只在常规裁剪仍无法落到硬上限时，
+    # 压缩旧技能文档，并在必要时淘汰最旧历史，至少保留最近两条消息。
+    if cost() > cap:
+        per_doc_limit = max(2000, target // max(1, len(history)))
+        for msg in history:
+            if _msg_has_skill_doc(msg):
+                _compact_skill_doc_message(msg, per_doc_limit)
+            if cost() <= target:
+                break
+        while len(history) > 2 and cost() > target:
+            history.pop(0)
+        if cost() > cap:
+            per_message_limit = max(1000, target // max(1, len(history)))
+            for msg in history:
+                _hard_compact_message(msg, per_message_limit)
+        if history and history[0].get('role') == 'user':
+            history[0] = _sanitize_leading_user_msg(history[0])
     print(f'[Debug] Trimmed context, current: {cost()} chars, {len(history)} messages.')
 
 def auto_make_url(base, path):

@@ -1,7 +1,7 @@
 """
 小红书美食博主 - 单次严格档审图 CLI（薄壳）。
 
-业务编排（pipeline / 找爆款 / 多轮闭环）请用 GA 对话模式（总入口 skills/hard_skills/agent_core/SKILL.md，小红书方言 skills/hard_skills/xhs_main/SKILL.md）。
+业务编排（pipeline / 找爆款 / 多轮闭环）请用 GA 对话模式（唯一入口 skills/hard_skills/agent_core/SKILL.md，依赖边界见 skills/registry.json）。
 本脚本只做"单次 review"调试。
 
 用法:

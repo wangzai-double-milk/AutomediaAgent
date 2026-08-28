@@ -7,15 +7,17 @@ version = "0.1.0"
 description = "Minimalist self-evolving autonomous agent framework"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
     "requests>=2.28",
+    "requests-toolbelt>=1.0",
+    "python-dotenv>=1.0",
     "beautifulsoup4>=4.12",
     "bottle>=0.12",
     "simple-websocket-server>=0.4",
     "aiohttp>=3.9",
     "moviepy>=1.0.3",
-    "streamlit>=1.28",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,11 @@ ui = [
     "prompt_toolkit>=3.0,<4",
     "rich>=13.0",
     "pillow>=9.0",
+    "PySide6>=6.5",
+]
+dev = [
+    "build>=1.2",
+    "pytest>=8.0",
 ]
 all-frontends = [
     "python-telegram-bot>=20.0",
@@ -46,8 +53,68 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = []
-packages = ["ga_cli"]
+py-modules = [
+    "agent_loop",
+    "agentmain",
+    "ga",
+    "llmcore",
+    "simphtml",
+    "TMWebDriver",
+]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "ga_cli*",
+    "tools*",
+    "plugins*",
+    "assets*",
+    "skills*",
+    "frontends*",
+    "reflect*",
+]
+exclude = ["skills.local*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"assets" = ["*.json", "*.txt"]
+"assets.demo" = ["*.png"]
+"assets.images" = ["*.jpg", "*.png"]
+"assets.tmwd_cdp_bridge" = ["*.json", "*.js", "*.html"]
+"frontends" = ["*.md", "*.html", "*.png"]
+"frontends.desktop" = ["*.json"]
+"frontends.desktop.static" = ["*.html", "*.css", "*.js"]
+"frontends.desktop.static.vendor" = ["*.js"]
+"frontends.desktop.src-tauri" = ["*.json"]
+"frontends.desktop.src-tauri.capabilities" = ["*.json"]
+"frontends.desktop.src-tauri.icons" = ["*.png"]
+"frontends.skins.boy" = ["*.json", "*.png"]
+"frontends.skins.dinosaur" = ["*.json", "*.png"]
+"frontends.skins.doux" = ["*.json", "*.png"]
+"frontends.skins.glube" = ["*.json", "*.png"]
+"frontends.skins.line" = ["*.json", "*.png", "*.txt"]
+"frontends.skins.mort" = ["*.json", "*.png"]
+"frontends.skins.tard" = ["*.json", "*.png"]
+"frontends.skins.vita" = ["*.json", "*.png"]
+"skills.hard_skills.agent_core" = ["*.md"]
+"skills.hard_skills.explore_mode" = ["*.md"]
+"skills.hard_skills.operate_mode" = ["*.md"]
+"skills.hard_skills.perception_action" = ["*.md"]
+"skills.hard_skills.research_mode" = ["*.md"]
+"skills.hard_skills.xhs_interact" = ["*.md"]
+"skills.hard_skills.xhs_publish" = ["*.md"]
+"skills.hard_skills.xhs_review" = ["*.md"]
+"skills.hard_skills.xhs_search" = ["*.md"]
+"skills.soft_skills.git_content_creation" = ["*.md"]
+"skills.soft_skills.search_anywhere" = ["*.md"]
+"skills.soft_skills.xhs_edit" = ["*.md"]
+"skills.soft_skills.xhs_review_prompt" = ["*.md"]
+"skills.soft_skills.xhs_roast_style" = ["*.md"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["__pycache__/*", "*.pyc", "*.pyo"]
+"assets.tmwd_cdp_bridge" = ["config.js"]
 
 [project.scripts]
 ga = "ga_cli.cli:main"

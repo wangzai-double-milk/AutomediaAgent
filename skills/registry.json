@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "layers": ["router", "workflow", "capability", "resource"],
+  "rules": {
+    "router_can_depend_on": ["workflow", "capability"],
+    "workflow_can_depend_on": ["capability", "resource"],
+    "capability_can_depend_on": ["resource"],
+    "resource_can_depend_on": []
+  },
+  "skills": {
+    "agent_core": {
+      "layer": "router",
+      "path": "hard_skills/agent_core/SKILL.md",
+      "routable": true,
+      "depends_on": ["research_mode", "operate_mode", "xhs_review", "xhs_search", "xhs_interact", "xhs_publish", "explore_mode"]
+    },
+    "research_mode": {
+      "layer": "workflow",
+      "path": "hard_skills/research_mode/SKILL.md",
+      "routable": false,
+      "depends_on": ["xhs_search", "explore_mode", "perception_action", "search_anywhere"]
+    },
+    "operate_mode": {
+      "layer": "workflow",
+      "path": "hard_skills/operate_mode/SKILL.md",
+      "routable": false,
+      "depends_on": ["xhs_search", "xhs_interact", "xhs_edit", "xhs_publish", "search_anywhere"]
+    },
+    "xhs_review": {
+      "layer": "workflow",
+      "path": "hard_skills/xhs_review/SKILL.md",
+      "routable": false,
+      "depends_on": ["xhs_search", "xhs_edit", "xhs_publish", "xhs_review_prompt", "xhs_roast_style"]
+    },
+    "explore_mode": {
+      "layer": "capability",
+      "path": "hard_skills/explore_mode/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "perception_action": {
+      "layer": "capability",
+      "path": "hard_skills/perception_action/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "xhs_search": {
+      "layer": "capability",
+      "path": "hard_skills/xhs_search/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "xhs_interact": {
+      "layer": "capability",
+      "path": "hard_skills/xhs_interact/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "xhs_edit": {
+      "layer": "capability",
+      "path": "soft_skills/xhs_edit/SKILL.md",
+      "routable": false,
+      "depends_on": ["xhs_review_prompt"]
+    },
+    "xhs_publish": {
+      "layer": "capability",
+      "path": "hard_skills/xhs_publish/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "search_anywhere": {
+      "layer": "capability",
+      "path": "soft_skills/search_anywhere/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "xhs_review_prompt": {
+      "layer": "resource",
+      "path": "soft_skills/xhs_review_prompt/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "xhs_roast_style": {
+      "layer": "resource",
+      "path": "soft_skills/xhs_roast_style/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "git_content_creation": {
+      "layer": "resource",
+      "path": "soft_skills/git_content_creation/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "stock_trading_xhs": {
+      "layer": "resource",
+      "path": "local/stock_trading_xhs/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "stock_trading_douyin": {
+      "layer": "resource",
+      "path": "local/stock_trading_douyin/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    }
+  }
+}

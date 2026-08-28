@@ -12,11 +12,16 @@ elif hasattr(sys.stderr, 'reconfigure'): sys.stderr.reconfigure(errors='replace'
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from llmcore import reload_mykeys, ToolClient, MixinSession, NativeToolClient, NativeClaudeSession, NativeOAISession, resolve_client
-from agent_loop import agent_runner_loop
+from agent_loop import (
+    TERMINAL_FAILED,
+    agent_runner_loop,
+    iter_agent_chunks,
+)
 try:
     from plugins.hooks import discover_and_load; discover_and_load()
 except Exception: pass
 from ga import GenericAgentHandler, smart_format, get_global_memory, format_error, consume_file
+from tools import task as task_state
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 def load_tool_schema(suffix=''):
@@ -168,11 +173,21 @@ class GenericAgent:
             self.llmclient.log_path = self.log_path
             gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, handler, TOOLS_SCHEMA, 
                                     max_turns=80, verbose=self.verbose, yield_info=True)
+            terminal = None
             try:
                 full_resp = ""; last_pos = 0; curr_turn = 0; turn_resps = []
-                for chunk in gen:
-                    if consume_file(self.task_dir, '_stop'): self.abort() 
-                    if self.stop_sig: break
+                def _abort_requested():
+                    if consume_file(self.task_dir, '_stop'):
+                        self.abort()
+                    return self.stop_sig
+
+                stream = iter_agent_chunks(gen, _abort_requested)
+                while True:
+                    try:
+                        chunk = next(stream)
+                    except StopIteration as exc:
+                        terminal = exc.value
+                        break
                     if isinstance(chunk, dict) and 'turn' in chunk: 
                         curr_turn = chunk['turn']; turn_resps.append(''); continue
                     full_resp += chunk;  turn_resps[-1] += chunk
@@ -184,11 +199,31 @@ class GenericAgent:
                                                                                   'turn': curr_turn, 'outputs': turn_resps[-2:]})
                 #if '</summary>' in full_resp: full_resp = full_resp.replace('</summary>', '</summary>\n\n')
                 #if '</file_content>' in full_resp: full_resp = re.sub(r'<file_content>\s*(.*?)\s*</file_content>', r'\n````\n<file_content>\n\1\n</file_content>\n````', full_resp, flags=re.DOTALL)                
-                display_queue.put({'done': full_resp, 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
+                terminal = terminal or {'result': TERMINAL_FAILED, 'error': 'missing terminal result'}
+                if self.task_dir:
+                    task_state.append_trace('task_terminal', terminal, task_dir=self.task_dir)
+                display_queue.put({
+                    'done': full_resp,
+                    'status': terminal.get('result'),
+                    'terminal': terminal,
+                    'source': source,
+                    'turn': curr_turn,
+                    'outputs': turn_resps.copy(),
+                })
                 self.history = handler.history_info
             except Exception as e:
                 print(f"Backend Error: {format_error(e)}")
-                display_queue.put({'done': full_resp + f'\n```\n{format_error(e)}\n```', 'source': source, 'turn': curr_turn, 'outputs': turn_resps.copy()})
+                terminal = {'result': TERMINAL_FAILED, 'error': format_error(e)}
+                if self.task_dir:
+                    task_state.append_trace('task_terminal', terminal, task_dir=self.task_dir)
+                display_queue.put({
+                    'done': full_resp + f'\n```\n{format_error(e)}\n```',
+                    'status': terminal['result'],
+                    'terminal': terminal,
+                    'source': source,
+                    'turn': curr_turn,
+                    'outputs': turn_resps.copy(),
+                })
             finally:
                 if self.stop_sig: print('User aborted the task.')
                 self.is_running = self.stop_sig = False

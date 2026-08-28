@@ -32,6 +32,10 @@ temp/
 tmp/
 *.log
 model_responses.txt
+/publish_dom_dump.json
+/*_dom_dump.json
+/_tmp_*.py
+/debug_*.py
 
 # Stray media dropped at repo root (creative deliverables / scratch downloads).
 # Anchored to root only, so tracked assets/ and frontends/ media are unaffected.
