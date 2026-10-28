@@ -7,30 +7,65 @@
     "capability_can_depend_on": ["resource"],
     "resource_can_depend_on": []
   },
+  "tool_skill_gates": {
+    "web_visual_click": "perception_action",
+    "web_visual_fill": "perception_action",
+    "web_learn_page": "perception_action",
+    "web_desktop": "perception_action",
+    "xhs_list_feeds": "xhs_search",
+    "xhs_search_feeds": "xhs_search",
+    "xhs_get_feed_detail": "xhs_search",
+    "xhs_user_profile": "xhs_search",
+    "xhs_search_viral": "xhs_search",
+    "xhs_like_feed": "xhs_interact",
+    "xhs_favorite_feed": "xhs_interact",
+    "xhs_post_comment": "xhs_interact",
+    "xhs_reply_comment": "xhs_interact",
+    "xhs_follow_user": "xhs_interact",
+    "xhs_notifications": "xhs_manage",
+    "xhs_own_profile": "xhs_manage",
+    "xhs_test_account": "xhs_manage",
+    "xhs_creator_page": "xhs_manage",
+    "xhs_manage_note": "xhs_manage",
+    "xhs_messages": "xhs_manage",
+    "xhs_drafts": "xhs_manage",
+    "xhs_collections": "xhs_manage",
+    "xhs_rss": "xhs_manage",
+    "xhs_prepare_note": "xhs_publish",
+    "xhs_publish_video": "xhs_publish",
+    "xhs_publish_longform": "xhs_publish",
+    "xhs_publish_podcast": "xhs_publish",
+    "xhs_content_queue": "xhs_publish",
+    "xhs_identify_dish": "xhs_edit",
+    "xhs_image_review": "xhs_edit",
+    "xhs_image_edit": "xhs_edit",
+    "xhs_image_generate": "xhs_edit",
+    "xhs_publish_note": "xhs_publish"
+  },
   "skills": {
     "agent_core": {
       "layer": "router",
       "path": "hard_skills/agent_core/SKILL.md",
       "routable": true,
-      "depends_on": ["research_mode", "operate_mode", "xhs_review", "xhs_search", "xhs_interact", "xhs_publish", "explore_mode"]
+      "depends_on": ["research_mode", "operate_mode", "xhs_review", "xhs_search", "xhs_interact", "xhs_publish", "xhs_manage", "explore_mode"]
     },
     "research_mode": {
       "layer": "workflow",
       "path": "hard_skills/research_mode/SKILL.md",
       "routable": false,
-      "depends_on": ["xhs_search", "explore_mode", "perception_action", "search_anywhere"]
+      "depends_on": ["xhs_search", "xhs_interact", "explore_mode", "perception_action", "search_anywhere"]
     },
     "operate_mode": {
       "layer": "workflow",
       "path": "hard_skills/operate_mode/SKILL.md",
       "routable": false,
-      "depends_on": ["xhs_search", "xhs_interact", "xhs_edit", "xhs_publish", "search_anywhere"]
+      "depends_on": ["xhs_search", "xhs_interact", "xhs_edit", "xhs_publish", "xhs_manage", "explore_mode", "perception_action", "search_anywhere", "commercial_ad_production", "git_content_creation", "personal_operating_method"]
     },
     "xhs_review": {
       "layer": "workflow",
       "path": "hard_skills/xhs_review/SKILL.md",
       "routable": false,
-      "depends_on": ["xhs_search", "xhs_edit", "xhs_publish", "xhs_review_prompt", "xhs_roast_style"]
+      "depends_on": ["xhs_search", "xhs_edit", "xhs_publish", "xhs_review_prompt"]
     },
     "explore_mode": {
       "layer": "capability",
@@ -68,8 +103,20 @@
       "routable": false,
       "depends_on": []
     },
-    "search_anywhere": {
+    "xhs_manage": {
       "layer": "capability",
+      "path": "hard_skills/xhs_manage/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "personal_operating_method": {
+      "layer": "resource",
+      "path": "soft_skills/personal_operating_method/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "search_anywhere": {
+      "layer": "resource",
       "path": "soft_skills/search_anywhere/SKILL.md",
       "routable": false,
       "depends_on": []
@@ -80,27 +127,15 @@
       "routable": false,
       "depends_on": []
     },
-    "xhs_roast_style": {
-      "layer": "resource",
-      "path": "soft_skills/xhs_roast_style/SKILL.md",
-      "routable": false,
-      "depends_on": []
-    },
     "git_content_creation": {
       "layer": "resource",
       "path": "soft_skills/git_content_creation/SKILL.md",
       "routable": false,
       "depends_on": []
     },
-    "stock_trading_xhs": {
+    "commercial_ad_production": {
       "layer": "resource",
-      "path": "local/stock_trading_xhs/SKILL.md",
-      "routable": false,
-      "depends_on": []
-    },
-    "stock_trading_douyin": {
-      "layer": "resource",
-      "path": "local/stock_trading_douyin/SKILL.md",
+      "path": "soft_skills/commercial_ad_production/SKILL.md",
       "routable": false,
       "depends_on": []
     }

@@ -3,8 +3,7 @@
 每次会话调一次 init_task() 建一个 tasks/<ts>_<slug>/ 文件夹，
 后续中间产物（识图 JSON、爆款图、修图、批注图）都丢这里方便回头排查。
 
-附带自动 trace 机制：所有 xhs_* 工具调用会被 ga.py 在执行前后
-自动 append_trace() 到当前 task 的 trace.log，无需 LLM 自己记账。
+各工具把关键动作和验证结果写入当前 task 的 `trace.log`。
 """
 
 import os
@@ -20,16 +19,11 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(_THIS_DIR, '..'))
 TASKS_ROOT = os.path.join(_PROJECT_ROOT, 'tasks')
 os.makedirs(TASKS_ROOT, exist_ok=True)
 
-# 兼容旧调用方/测试的进程级回退值。正常运行使用 ContextVar，避免同一进程内
-# 多个 Agent 线程互相覆盖当前任务。
-_CURRENT_TASK_DIR = None
 _CURRENT_TASK_DIR_CTX = ContextVar('ga_current_task_dir', default=None)
 
 
 def set_current(task_dir: str = None) -> None:
     """绑定当前执行上下文的 task_dir；不会影响其他线程/async context。"""
-    global _CURRENT_TASK_DIR
-    _CURRENT_TASK_DIR = task_dir
     _CURRENT_TASK_DIR_CTX.set(task_dir)
 
 
@@ -66,7 +60,7 @@ def init_task(user_request: str, image: str = None) -> dict:
 
 def get_current() -> str:
     """返回当前活跃的 task_dir，None = 还没 init。"""
-    return _CURRENT_TASK_DIR_CTX.get() or _CURRENT_TASK_DIR
+    return _CURRENT_TASK_DIR_CTX.get()
 
 
 def ensure_task(hint: str = '') -> str:

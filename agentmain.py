@@ -17,43 +17,19 @@ from agent_loop import (
     agent_runner_loop,
     iter_agent_chunks,
 )
-try:
-    from plugins.hooks import discover_and_load; discover_and_load()
-except Exception: pass
 from ga import GenericAgentHandler, smart_format, get_global_memory, format_error, consume_file
 from tools import task as task_state
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-def load_tool_schema(suffix=''):
+def load_tool_schema():
     global TOOLS_SCHEMA
-    TS = open(os.path.join(script_dir, f'assets/tools_schema{suffix}.json'), 'r', encoding='utf-8').read()
+    TS = open(os.path.join(script_dir, 'assets/tools_schema.json'), 'r', encoding='utf-8').read()
     TOOLS_SCHEMA = json.loads(TS if os.name == 'nt' else TS.replace('powershell', 'bash'))
-    
-    # 动态加载 plugins 下的 tools_schema
-    plugins_dir = os.path.join(script_dir, 'plugins')
-    if os.path.isdir(plugins_dir):
-        for fname in os.listdir(plugins_dir):
-            if fname.endswith('.json'):
-                try:
-                    with open(os.path.join(plugins_dir, fname), 'r', encoding='utf-8') as f:
-                        plugin_schema = json.load(f)
-                        if isinstance(plugin_schema, list):
-                            TOOLS_SCHEMA.extend(plugin_schema)
-                        elif isinstance(plugin_schema, dict):
-                            TOOLS_SCHEMA.append(plugin_schema)
-                except Exception as e:
-                    print(f"[WARN] Failed to load plugin schema {fname}: {e}")
 load_tool_schema()
 
 lang_suffix = '_en' if os.environ.get('GA_LANG', '') == 'en' else ''
 mem_dir = os.path.join(script_dir, 'memory')
 if not os.path.exists(mem_dir): os.makedirs(mem_dir)
-mem_txt = os.path.join(mem_dir, 'global_mem.txt')
-if not os.path.exists(mem_txt): open(mem_txt, 'w', encoding='utf-8').write('# [Global Memory - L2]\n')
-mem_insight = os.path.join(mem_dir, 'global_mem_insight.txt')
-if not os.path.exists(mem_insight):
-    t = os.path.join(script_dir, f'assets/global_mem_insight_template{lang_suffix}.txt')
-    open(mem_insight, 'w', encoding='utf-8').write(open(t, encoding='utf-8').read() if os.path.exists(t) else '')
 cdp_cfg = os.path.join(script_dir, 'assets/tmwd_cdp_bridge/config.js')
 if not os.path.exists(cdp_cfg):
     try:
@@ -85,21 +61,25 @@ class GenericAgent:
         if not changed and hasattr(self, 'llmclients'): return
         try: oldhistory = self.llmclient.backend.history
         except: oldhistory = None
-        llm_sessions = []
+        llm_sessions, mixin_configs = [], []
         for k, cfg in mykeys.items():
             if not any(x in k for x in ['api', 'config', 'cookie']): continue
             try:
-                if 'mixin' in k: llm_sessions += [{'mixin_cfg': cfg}]
+                if 'mixin' in k: mixin_configs.append(cfg)
                 elif c := resolve_client(k): llm_sessions += [c]
             except: pass
-        for i, s in enumerate(llm_sessions):
-            if isinstance(s, dict) and 'mixin_cfg' in s:
-                try:
-                    mixin = MixinSession(llm_sessions, s['mixin_cfg'])
-                    if isinstance(mixin._sessions[0], (NativeClaudeSession, NativeOAISession)): llm_sessions[i] = NativeToolClient(mixin)
-                    else: llm_sessions[i] = ToolClient(mixin)
-                except Exception as e: print(f'\n\n\n[ERROR] Failed to init MixinSession with cfg {s["mixin_cfg"]}: {e}!!!\n\n')
+        for cfg in mixin_configs:
+            try:
+                mixin = MixinSession(llm_sessions, cfg)
+                if isinstance(mixin._sessions[0], (NativeClaudeSession, NativeOAISession)):
+                    llm_sessions.append(NativeToolClient(mixin))
+                else:
+                    llm_sessions.append(ToolClient(mixin))
+            except Exception as e:
+                print(f'[ERROR] Failed to init MixinSession: {e}')
         self.llmclients = llm_sessions
+        if not self.llmclients:
+            raise ValueError("没有可用模型配置，请检查 config.json 的 API Key、模型名和接口地址。")
         self.llmclient = self.llmclients[self.llm_no%len(self.llmclients)]
         if oldhistory: self.llmclient.backend.history = oldhistory
     
@@ -111,9 +91,7 @@ class GenericAgent:
         try: self.llmclient.backend.history = lastc.backend.history
         except: raise Exception('[ERROR] BAD Mixin config: Check your mykey.py')
         self.llmclient.last_tools = ''
-        name = self.get_llm_name(model=True)
-        if 'glm' in name or 'minimax' in name or 'kimi' in name: load_tool_schema('_cn')
-        else: load_tool_schema()
+        load_tool_schema()
     def list_llms(self): 
         self.load_llm_sessions()
         return [(i, self.get_llm_name(b), i == self.llm_no) for i, b in enumerate(self.llmclients)]
@@ -158,6 +136,7 @@ class GenericAgent:
             if raw_query is None:
                 self.task_queue.task_done(); continue
             self.is_running = True
+            task_state.set_current(self.task_dir)
             rquery = smart_format(raw_query.replace('\n', ' '), max_str_len=200)
             self.history.append(f"[USER]: {rquery}")
             
@@ -230,8 +209,6 @@ class GenericAgent:
                 self.task_queue.task_done()
                 if self.handler is not None: self.handler.code_stop_signal.append(1)
 
-GeneraticAgent = GenericAgent    
-
 if __name__ == '__main__':
     import argparse
     from datetime import datetime
@@ -255,7 +232,7 @@ if __name__ == '__main__':
             stderr=open(os.path.join(d, 'stderr.log'), 'w', encoding='utf-8'))
         print(p.pid); sys.exit(0)
 
-    agent = GeneraticAgent()
+    agent = GenericAgent()
     agent.next_llm(args.llm_no)
     agent.verbose = args.verbose
     threading.Thread(target=agent.run, daemon=True).start()
@@ -327,7 +304,7 @@ if __name__ == '__main__':
             try: model = agent.get_llm_name(model=True) or '?'
             except Exception: model = '?'
             try:
-                sys.stdout.write(f'\x1b[92m✦\x1b[0m \x1b[1mGenericAgent\x1b[0m '
+                sys.stdout.write(f'\x1b[92m✦\x1b[0m \x1b[1mAutoMedia Agent\x1b[0m '
                                  f'\x1b[90m· cli · model:\x1b[0m {model}\n')
                 sys.stdout.flush()
             except Exception: pass

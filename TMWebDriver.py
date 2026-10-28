@@ -86,7 +86,12 @@ class TMWebDriver:
             while time.time() - start_time < 5:
                 try:
                     msg = msgQ.get(timeout=0.2)
-                    try: self._record_ack(json.loads(msg).get('id', ''))
+                    try:
+                        exec_id = json.loads(msg).get('id', '')
+                        with self._request_lock:
+                            if exec_id not in self._pending_requests:
+                                continue
+                            self.acks[exec_id] = True
                     except Exception: traceback.print_exc()
                     return msg
                 except queue.Empty: continue

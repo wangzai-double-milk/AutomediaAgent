@@ -1,15 +1,16 @@
 import sys, os, re, json, time, threading, importlib, uuid
-from datetime import datetime
 from pathlib import Path
+from contextvars import ContextVar
+import hashlib
 import tempfile, traceback, subprocess, itertools, collections, difflib
 import urllib.request
-import base64, mimetypes
+import base64
 if sys.stdout is None: sys.stdout = open(os.devnull, "w")
 if sys.stderr is None: sys.stderr = open(os.devnull, "w")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent_loop import BaseHandler, StepOutcome, json_default
-from tools import research_trace
+from tools import research_trace, skill_registry
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def code_run(code, code_type="python", timeout=60, cwd=None, code_cwd=None, stop_signal=None, maxlen=10000):
@@ -101,6 +102,32 @@ def ask_user(question, candidates=None):
 
 import simphtml
 driver = None
+_browser_session = ContextVar('ga_browser_session', default=None)
+_browser_action_lock = threading.RLock()
+
+
+class _PinnedDriver:
+    """Bind all rich-page helper scripts to the selected tab, including monitors."""
+
+    def __init__(self, target, session_id):
+        self.target, self.session_id = target, session_id
+
+    def __getattr__(self, name):
+        return getattr(self.target, name)
+
+    def execute_js(self, code, *args, **kwargs):
+        kwargs.setdefault('session_id', self.session_id)
+        return self.target.execute_js(code, *args, **kwargs)
+
+
+def _selected_tab(switch_tab_id=None):
+    selected = switch_tab_id if switch_tab_id is not None else _browser_session.get()
+    if selected is None:
+        selected = driver.default_session_id
+    _browser_session.set(selected)
+    return selected
+
+
 def first_init_driver():
     global driver
     from TMWebDriver import TMWebDriver
@@ -130,16 +157,17 @@ def web_scan(tabs_only=False, switch_tab_id=None, text_only=False, maxlen=35000)
             sess.pop('type', None)
             sess['url'] = sess.get('url', '')[:50] + ("..." if len(sess.get('url', '')) > 50 else "")
             tabs.append(sess)
-        if switch_tab_id: driver.default_session_id = switch_tab_id
+        selected = _selected_tab(switch_tab_id)
+        if switch_tab_id: driver.default_session_id = selected
         result = {
             "status": "success",
             "metadata": {
                 "tabs_count": len(tabs), "tabs": tabs,
-                "active_tab": driver.default_session_id
+                "active_tab": selected
             }
         }
         if not tabs_only: 
-            importlib.reload(simphtml); result["content"] = simphtml.get_html(driver, cutlist=True, maxchars=maxlen, text_only=text_only)
+            importlib.reload(simphtml); result["content"] = simphtml.get_html(_PinnedDriver(driver, selected), cutlist=True, maxchars=maxlen, text_only=text_only)
             if text_only: result['content'] = smart_format(result['content'], max_str_len=maxlen//3, omit_str='\n\n[omitted long content]\n\n')
         return result
     except Exception as e:
@@ -154,38 +182,15 @@ def format_error(e):
         return f"{exc_type.__name__}: {str(e)} @ {fname}:{f.lineno}, {f.name} -> `{f.line}`"
     return f"{exc_type.__name__}: {str(e)}"
 
-def log_memory_access(path):
-    if 'memory' not in path: return
-    stats_file = os.path.join(script_dir, 'memory/file_access_stats.json')
-    try:
-        with open(stats_file, 'r', encoding='utf-8') as f: stats = json.load(f)
-    except: stats = {}
-    fname = os.path.basename(path)
-    stats[fname] = {'count': stats.get(fname, {}).get('count', 0) + 1, 'last': datetime.now().strftime('%Y-%m-%d')}
-    with open(stats_file, 'w', encoding='utf-8') as f: json.dump(stats, f, indent=2, ensure_ascii=False)
-
-# xhs 核心工具 → 执行前必须先 file_read 的 SOP（硬 gate）。
-# 用户要求："P 图前必须看一下 P 图 skills"，推广到所有核心操作：先读对应 SOP 再动手。
-XHS_TOOL_SOP_GATE = {
-    'xhs_search_viral': 'skills/hard_skills/xhs_search/SKILL.md',
-    'xhs_image_review': 'skills/hard_skills/xhs_review/SKILL.md',
-    'xhs_image_edit': 'skills/soft_skills/xhs_edit/SKILL.md',
-    'xhs_image_generate': 'skills/soft_skills/xhs_edit/SKILL.md',
-    'xhs_publish_note': 'skills/hard_skills/xhs_publish/SKILL.md',
-    'xhs_like_feed': 'skills/hard_skills/xhs_interact/SKILL.md',
-    'xhs_favorite_feed': 'skills/hard_skills/xhs_interact/SKILL.md',
-    'xhs_post_comment': 'skills/hard_skills/xhs_interact/SKILL.md',
-    'xhs_reply_comment': 'skills/hard_skills/xhs_interact/SKILL.md',
-}
-
 def web_execute_js(script, switch_tab_id=None, no_monitor=False):
     """执行 JS 脚本来控制浏览器，并捕获结果和页面变化"""
     global driver
     try:
         if driver is None: first_init_driver()
         if len(driver.get_all_sessions()) == 0: return {"status": "error", "msg": "没有可用的浏览器标签页，查L3记忆分析原因。"}
-        if switch_tab_id: driver.default_session_id = switch_tab_id
-        result = simphtml.execute_js_rich(script, driver, no_monitor=no_monitor)
+        selected = _selected_tab(switch_tab_id)
+        if switch_tab_id: driver.default_session_id = selected
+        result = simphtml.execute_js_rich(script, _PinnedDriver(driver, selected), no_monitor=no_monitor)
         return result
     except Exception as e: return {"status": "error", "msg": format_error(e)}
 
@@ -208,30 +213,40 @@ def ensure_xhs_tab(want_creator=False):
                     return s
             return None
 
-        chosen = None
-        if want_creator:
-            chosen = pick(lambda u: 'creator.xiaohongshu.com' in u)
+        def compatible(session):
+            url = session.get('url') or ''
+            if want_creator:
+                return 'creator.xiaohongshu.com' in url
+            return 'xiaohongshu.com' in url and 'creator.xiaohongshu.com' not in url
+
+        pinned_id = _browser_session.get()
+        chosen = next(
+            (session for session in sessions
+             if session.get('id') == pinned_id and compatible(session)),
+            None,
+        )
         if chosen is None:
-            chosen = pick(lambda u: 'xiaohongshu.com' in u)
+            chosen = pick(
+                lambda url: 'creator.xiaohongshu.com' in url
+                if want_creator else
+                'xiaohongshu.com' in url and 'creator.xiaohongshu.com' not in url
+            )
 
         if chosen is not None:
             driver.default_session_id = chosen['id']
-            return {'ok': True, 'tab_id': chosen['id'], 'url': chosen.get('url', ''), 'reason': 'switched'}
+            _browser_session.set(chosen['id'])
+            reason = 'pinned' if chosen['id'] == pinned_id else 'switched'
+            return {'ok': True, 'tab_id': chosen['id'], 'url': chosen.get('url', ''), 'reason': reason}
 
         # 没有任何小红书 tab：在当前默认 tab 上导航到目标站（最稳，不新开 tab 避免 default 又错位）
         target = 'https://creator.xiaohongshu.com' if want_creator else 'https://www.xiaohongshu.com'
         web_execute_js(f"window.location.href='{target}';'navigating';")
         time.sleep(4.0)
         sessions = driver.get_all_sessions()
-        chosen = None
-        if want_creator:
-            for s in sessions:
-                if 'creator.xiaohongshu.com' in (s.get('url') or ''): chosen = s; break
-        if chosen is None:
-            for s in sessions:
-                if 'xiaohongshu.com' in (s.get('url') or ''): chosen = s; break
+        chosen = next((session for session in sessions if compatible(session)), None)
         if chosen is not None:
             driver.default_session_id = chosen['id']
+            _browser_session.set(chosen['id'])
             return {'ok': True, 'tab_id': chosen['id'], 'url': chosen.get('url', ''), 'reason': 'navigated'}
         return {'ok': False, 'tab_id': driver.default_session_id, 'url': '', 'reason': 'navigate_failed'}
     except Exception as e:
@@ -248,10 +263,11 @@ def cdp_send(method, params=None, switch_tab_id=None):
     try:
         if driver is None: first_init_driver()
         if len(driver.get_all_sessions()) == 0: return {'error': '没有可用的浏览器标签页'}
-        if switch_tab_id: driver.default_session_id = switch_tab_id
+        selected = _selected_tab(switch_tab_id)
+        if switch_tab_id: driver.default_session_id = selected
         payload = json.dumps({'cmd': 'cdp', 'method': method, 'params': params or {}})
         # driver.execute_js 看到 string-of-json-with-cmd 会走 handleExtMessage
-        result = driver.execute_js(payload)
+        result = driver.execute_js(payload, session_id=selected)
         if isinstance(result, dict):
             return result.get('data') or result
         return {'data': result}
@@ -388,10 +404,12 @@ def cdp_find_xhs_publish_bar_btn(switch_tab_id=None):
             if name.lower() == 'xhs-publish-btn':
                 in_publish = True
             if in_publish and name == 'BUTTON':
-                low = _attrs(node).get('class', '').lower()
+                attrs = _attrs(node)
+                low = attrs.get('class', '').lower()
                 txt = _btn_text(node)
                 # 发布：class 含 bg-red、文本恰为"发布"（不含"暂存"，避免误命中）
-                if 'ce-btn' in low and 'bg-red' in low and '发布' in txt and '暂存' not in txt:
+                if ('ce-btn' in low and 'bg-red' in low and '发布' in txt and '暂存' not in txt
+                        and 'disabled' not in attrs and attrs.get('aria-disabled') != 'true'):
                     hits.append(node.get('backendNodeId'))
             for sr in node.get('shadowRoots', []) or []:
                 walk(sr, in_publish)
@@ -402,7 +420,10 @@ def cdp_find_xhs_publish_bar_btn(switch_tab_id=None):
         if not hits:
             label = '发布(button.ce-btn.bg-red)'
             return {'ok': False, 'reason': f'未找到 {label}'}
+        if len(hits) != 1:
+            return {'ok': False, 'reason': '发布按钮不唯一'}
 
+        cdp_send('DOM.scrollIntoViewIfNeeded', {'backendNodeId': hits[0]}, switch_tab_id=switch_tab_id)
         bm = cdp_send('DOM.getBoxModel', {'backendNodeId': hits[0]}, switch_tab_id=switch_tab_id)
         if not isinstance(bm, dict) or 'model' not in bm:
             return {'ok': False, 'reason': f'getBoxModel 失败: {bm}'}
@@ -498,7 +519,7 @@ def cdp_set_xhs_visibility(level='self', switch_tab_id=None):
             return None
         c = bm['model']['content']
         x, y = round((c[0] + c[4]) / 2), round((c[1] + c[5]) / 2)
-        cdp_mouse_click(x, y)
+        cdp_mouse_click(x, y, switch_tab_id=switch_tab_id)
         return (x, y)
 
     try:
@@ -547,7 +568,7 @@ def cdp_set_xhs_visibility(level='self', switch_tab_id=None):
         return {'ok': False, 'reason': format_error(e)}
 
 
-def cdp_upload_files_to_input(image_paths, switch_tab_id=None):
+def cdp_upload_files_to_input(image_paths, switch_tab_id=None, media_kind=None):
     """用 CDP DOM.setFileInputFiles 给发布页的 file input 灌图（传本地路径，payload 极小）。
 
     为什么不用 JS DataTransfer + base64：base64 内联进 JS code 字符串后 payload 巨大，
@@ -576,7 +597,12 @@ def cdp_upload_files_to_input(image_paths, switch_tab_id=None):
             if (node.get('nodeName') or '') == 'INPUT':
                 a = _attrs(node)
                 if a.get('type') == 'file' or 'upload-input' in a.get('class', ''):
-                    found.append(node.get('backendNodeId'))
+                    accept = a.get('accept', '').lower()
+                    compatible = (media_kind is None or not accept or
+                                  (media_kind == 'video' and ('video' in accept or '.mp4' in accept)) or
+                                  (media_kind == 'image' and ('image' in accept or '.jpg' in accept or '.png' in accept)))
+                    if compatible:
+                        found.append(node.get('backendNodeId'))
             for ch in node.get('children', []) or []:
                 walk(ch)
             for sr in node.get('shadowRoots', []) or []:
@@ -585,6 +611,8 @@ def cdp_upload_files_to_input(image_paths, switch_tab_id=None):
         walk(doc['root'])
         if not found:
             return {'ok': False, 'reason': '未找到 file input（input.upload-input / input[type=file]）'}
+        if media_kind is not None and len(found) != 1:
+            return {'ok': False, 'reason': f'{media_kind} 上传输入不唯一，命中 {len(found)} 个'}
 
         bid = found[0]
         sr = cdp_send('DOM.setFileInputFiles',
@@ -612,6 +640,32 @@ def cdp_wait_publish_editor(timeout=14.0, switch_tab_id=None):
             return True
         time.sleep(0.5)
     return False
+
+
+def wait_xhs_publish_result(switch_tab_id=None, timeout=15.0):
+    """Observe application acknowledgement without ever replaying the submit."""
+    deadline = time.monotonic() + timeout
+    script = """JSON.stringify({
+      url: location.href,
+      success: Array.from(document.querySelectorAll('[role="alert"],[class*="toast"],[class*="success"],h1,h2,h3'))
+        .some(el => el.getClientRects().length && /^发布成功[！!。\\s]*$/.test((el.innerText || '').trim()))
+    })"""
+    while time.monotonic() < deadline:
+        result = web_execute_js(script, switch_tab_id=switch_tab_id, no_monitor=True)
+        try:
+            data = result.get('js_return')
+            if isinstance(data, str):
+                data = json.loads(data)
+            if isinstance(data, dict):
+                from urllib.parse import urlsplit
+                url = urlsplit(data.get('url', ''))
+                if (url.hostname == 'creator.xiaohongshu.com'
+                        and (data.get('success') is True or url.path.rstrip('/') == '/publish/success')):
+                    return {'verified': True, 'url': data.get('url'), 'signal': 'publish_success'}
+        except (ValueError, TypeError, AttributeError):
+            pass
+        time.sleep(0.5)
+    return {'verified': False, 'reason': 'publication acknowledgement not observed'}
 
 
 
@@ -715,10 +769,38 @@ class GenericAgentHandler(BaseHandler):
         self.code_stop_signal = []
         self._done_hooks = []
 
+    def dispatch(self, tool_name, args, response, index=0, tool_num=1):
+        gate = self._xhs_sop_gate(tool_name, args)
+        if gate is not None:
+            return gate
+        if tool_name in {'web_execute_js', 'web_visual_click', 'web_visual_fill', 'web_desktop'}:
+            from tools.xhs_test_control import generic_guard, TestDeferred
+            try:
+                blocked = generic_guard(tool_name, args)
+            except TestDeferred as exc:
+                blocked = exc.result
+            if blocked:
+                return StepOutcome(blocked, next_prompt='', should_exit=True)
+        if tool_name.startswith(('web_', 'xhs_')):
+            with _browser_action_lock:
+                token = _browser_session.set(getattr(self.parent, 'browser_tab_id', None))
+                try:
+                    return (yield from super().dispatch(tool_name, args, response, index, tool_num))
+                finally:
+                    self.parent.browser_tab_id = _browser_session.get()
+                    _browser_session.reset(token)
+        return (yield from super().dispatch(tool_name, args, response, index, tool_num))
+
     def _get_abs_path(self, path):
         if not path: return ""
         if os.path.isabs(path):
             return os.path.normpath(path)
+        normalized = path.replace('\\', '/')
+        if normalized.startswith('skills/'):
+            root = Path(self.project_root).resolve()
+            candidate = (root / normalized).resolve()
+            if candidate.is_relative_to(root / 'skills'):
+                return str(candidate)
         naive = os.path.abspath(os.path.join(self.cwd, path))
         # 相对路径在项目根就能命中：保持原行为（也是新建文件 file_write 的默认落点）。
         if os.path.exists(naive):
@@ -931,8 +1013,20 @@ class GenericAgentHandler(BaseHandler):
             count = 200
         keyword = args.get("keyword")
         show_linenos = args.get("show_linenos", True)
-        result = file_read(path, start=start, keyword=keyword,
-                           count=count, show_linenos=show_linenos)
+        skill_content = None
+        if Path(path).name == 'SKILL.md' and Path(path).is_file():
+            # A prerequisite is only satisfied after the entire SOP is delivered.
+            try:
+                skill_content = Path(path).read_text(encoding='utf-8')
+            except (OSError, UnicodeError):
+                pass
+        if skill_content is not None:
+            result = "\n".join(f"{i}|{line}" if show_linenos else line
+                               for i, line in enumerate(skill_content.splitlines(), 1))
+        else:
+            result = file_read(path, start=start, keyword=keyword,
+                               count=count, show_linenos=show_linenos)
+        read_succeeded = not result.startswith("Error:") and bool(result.strip())
         if show_linenos and not result.startswith("Error:"): result = '由于设置了show_linenos，以下返回信息为：(行号|)内容 。\n' + result 
         if ' ... [TRUNCATED]' in result: result += '\n\n（某些行被截断，如需完整内容可改用 code_run 读取）'
         # 技能/SOP/记忆文档：不做整体截断，并加 <skill_doc> 保护标记，让上下文压缩阶段整体豁免。
@@ -943,13 +1037,12 @@ class GenericAgentHandler(BaseHandler):
             maxlen = 15000 // args.get('_tool_num', 1)
             result = smart_format(result, max_str_len=maxlen, omit_str='\n\n[omitted long content]\n\n')
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
-        log_memory_access(path)
-        if 'memory' in path or 'sop' in path or 'skill' in path.lower(): 
+        if read_succeeded and ('memory' in path or 'sop' in path or 'skill' in path.lower()):
             next_prompt += "\n[SYSTEM TIPS] 正在读取记忆或SOP文件，若决定按sop执行请提取sop中的关键点（特别是靠后的）update working memory."
             # 记录本任务读过的 SOP（供 xhs 工具 SOP gate 校验）。
             # 存归一化后的完整路径（而非 basename），因为所有技能都叫 SKILL.md，
             # basename 无法区分 domain，gate 的 `domain in r` 必须能匹配到路径里的 domain 段。
-            self.working.setdefault('read_sops', set()).add(path.replace('\\', '/'))
+            self.working.setdefault('read_sops', set()).add(str(Path(path).resolve()))
         return StepOutcome(result, next_prompt=next_prompt)
     
     def _in_plan_mode(self): return self.working.get('in_plan_mode')
@@ -971,7 +1064,6 @@ class GenericAgentHandler(BaseHandler):
         self.working['passed_sessions'] = 0
         yield f"[Info] Updated key_info and related_sop.\n"
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
-        #next_prompt += '\n[SYSTEM TIPS] 此函数一般在任务开始或中间时调用，如果任务已成功完成应该是start_long_term_update用于结算长期记忆。\n'
         return StepOutcome({"result": "working key_info updated"}, next_prompt=next_prompt)
 
     def do_record_research_delta(self, args, response):
@@ -1113,39 +1205,18 @@ class GenericAgentHandler(BaseHandler):
 
     def _xhs_sop_gate(self, tool_name, args):
         '''硬 gate：核心 xhs 工具执行前必须先 file_read 过对应 SOP，否则拦截并要求先读。
-        返回 None 放行；返回 StepOutcome 表示拦截。_index>0（同批多工具的非首个）不重复拦。'''
-        # 提取需要校验的技能 domain (如 xhs_edit, xhs_publish)
-        domain_map = {
-            'xhs_search_viral': 'xhs_search',
-            'xhs_image_generate': 'xhs_edit',
-            'xhs_image_edit': 'xhs_edit',
-            'xhs_image_review': 'xhs_review',
-            'xhs_publish_note': 'xhs_publish',
-        }
-        domain = domain_map.get(tool_name)
-        if not domain:
-            # 尝试回退旧字典
-            domain = XHS_TOOL_SOP_GATE.get(tool_name, '').split('_sop')[0].replace('memory/', '')
-        if not domain:
+        返回 None 放行；返回 StepOutcome 表示拦截。每个工具调用均独立检查。'''
+        try:
+            required = skill_registry.tool_gate(self.project_root, tool_name)
+        except (OSError, ValueError, KeyError) as exc:
+            return StepOutcome({'status': 'error', 'msg': f'技能注册表异常: {exc}'}, next_prompt='\n')
+        if required is None:
             return None
-        if args.get('_index', 0) > 0:
+        domain = required.parent.name
+        read = {str(Path(path).resolve()) for path in self.working.get('read_sops', set())}
+        if required.is_file() and str(required) in read:
             return None
-            
-        read = self.working.get('read_sops') or set()
-        
-        # 只要读过路径里包含该 domain 且以 skill.md 结尾的文件即可 (兼容 hard_skills / soft_skills，大小写不敏感)
-        passed = False
-        for r in read:
-            rl = r.lower()
-            if domain in rl and rl.endswith('skill.md'):
-                passed = True
-                break
-                
-        if passed:
-            return None
-            
-        # 构造提示路径，如果是软技能提示软技能路径，否则提示硬技能路径
-        hint_path = f"skills/soft_skills/{domain}/SKILL.md" if domain in ['xhs_edit', 'xhs_roast_style'] else f"skills/hard_skills/{domain}/SKILL.md"
+        hint_path = str(required)
             
         err = (
             f'BLOCKED: 调用 {tool_name} 前必须先阅读对应 SOP。\n'
@@ -1315,10 +1386,11 @@ class GenericAgentHandler(BaseHandler):
                     elif step == 'get_feed_detail_done' and pay.get('ok'):
                         # 兼容旧 trace（没有 research_item_read 的历史任务）。
                         read_keys.add(('xiaohongshu', 'note', pay.get('feed_id') or len(read_keys)))
-                    elif step in ('vlm_analyze_succeeded', 'vlm_analyze_done') and pay.get('video_url'):
+                    elif step in ('vlm_analyze_succeeded', 'vlm_analyze_done'):
                         result = str(pay.get('result') or '')
                         if not result.startswith('[Error]') and not result.startswith('【⚠️未完成'):
-                            read_keys.add(('video', 'stream', pay.get('video_url')))
+                            if pay.get('video_url'):
+                                read_keys.add(('video', 'stream', pay.get('video_url')))
                             failed_media.discard(pay.get('media_key') or pay.get('video_url'))
                     elif step == 'vlm_analyze_failed':
                         failed_media.add(pay.get('media_key') or pay.get('video_url') or pay.get('call_id'))
@@ -1365,8 +1437,13 @@ class GenericAgentHandler(BaseHandler):
             return None
 
 
-    def _xhs_actions(self):
+    def _xhs_actions(self, args=None):
         '''延迟 import xhs_actions（移植自参考项目的稳定 selector 数据/互动层）。'''
+        if args is not None:
+            from tools.xhs_publish import select_transport
+            if select_transport(args.get('transport', 'auto')) == 'desktop':
+                from tools.xhs_read_desktop import Actions
+                return Actions(args)
         from tools import xhs_actions as _a
         return _a
 
@@ -1378,23 +1455,6 @@ class GenericAgentHandler(BaseHandler):
 
 
 
-
-    def do_start_long_term_update(self, args, response):
-        '''Agent觉得当前任务完成后有重要信息需要记忆时调用此工具。'''
-        prompt = '''### [总结提炼经验] 既然你觉得当前任务有重要信息需要记忆，请提取最近一次任务中【事实验证成功且长期有效】的环境事实、用户偏好、重要步骤，更新记忆。
-本工具是标记开启结算过程，若已在更新记忆过程或没有值得记忆的点，忽略本次调用。
-**如果没有经验证的，未来能用上的信息，忽略本次调用！**
-**只能提取行动验证成功的信息**：
-- **环境事实**（路径/凭证/配置）→ `file_patch` 更新 L2，同步 L1
-- **复杂任务经验**（关键坑点/前置条件/重要步骤）→ L3 精简 SOP（只记你被坑得多次重试的核心要点）
-**禁止**：临时变量、具体推理过程、未验证信息、通用常识、你可以轻松复现的细节、只是做了但没有验证的信息
-**操作**：严格遵循提供的L0的记忆更新SOP。先 `file_read` 看现有 → 判断类型 → 最小化更新 → 无新内容跳过，保证对记忆库最小局部修改。\n
-''' + get_global_memory()
-        yield "[Info] Start distilling good memory for long-term storage.\n"
-        path = './memory/memory_management_sop.md'
-        if os.path.exists(path): result = 'This is L0:\n' + file_read(path, show_linenos=False)
-        else: result = "Memory Management SOP not found. Do not update memory."
-        return StepOutcome(result, next_prompt=prompt)
 
     def _fold_earlier(self, lines):
         FALLBACK = '直接回答了用户问题'
@@ -1755,12 +1815,6 @@ class GenericAgentHandler(BaseHandler):
         skip_navigate = bool(args.get('skip_navigate', False))
         if not keyword and not skip_navigate:
             return StepOutcome({'status': 'error', 'msg': 'keyword 必填（除非 skip_navigate=true）'}, next_prompt='\n')
-
-        # 🚦 SOP gate：搜爆款前必须先读 xhs_search_sop
-        _gate = self._xhs_sop_gate('xhs_search_viral', args)
-        if _gate is not None:
-            yield '[Block] 搜爆款前未读 xhs_search_sop.md，已拦截\n'
-            return _gate
 
         task = self._xhs_task()
         td = task.get_current()
@@ -2296,40 +2350,14 @@ class GenericAgentHandler(BaseHandler):
 
 
     def do_xhs_image_review(self, args, response):
-        '''小红书严格档审图：返回 6 维评分 + 三档判定 + 修图话术 / 重拍清单 / 与爆款对比。'''
+        '''小红书视觉诊断：返回三档判定及修图/重拍建议，可选爆款对比。'''
         image = args.get('image', '')
         hint = args.get('hint', '') or ''
         refs = args.get('reference_images') or None
         if not image:
             return StepOutcome({'status': 'error', 'msg': 'image 必填'}, next_prompt='\n')
 
-        # 🚦 SOP gate：审图前必须先读 xhs_review_sop
-        _gate = self._xhs_sop_gate('xhs_image_review', args)
-        if _gate is not None:
-            yield '[Block] 审图前未读 xhs_review_sop.md，已拦截\n'
-            return _gate
-
-        # 🚦 硬 gate：审图前必须先有爆款参考图
-        if not refs or len(refs) < 3:
-            err = (
-                'BLOCKED: xhs_image_review 必须传 reference_images 且至少 3 张同品类爆款封面本地路径。\n'
-                '正确顺序：\n'
-                '  1) xhs_task_init 建工作区\n'
-                '  2) code_run 调豆包 VLM 识图（拿 dish_name + search_keywords）\n'
-                '  3) web_execute_js 在小红书搜 search_keywords[0]，抓前 5 张高赞封面 url\n'
-                '  4) code_run 把封面下载到 task_dir/viral_refs/\n'
-                '  5) 把这些本地路径作为 reference_images 再次调用本工具\n'
-                '禁止裸调本工具。'
-            )
-            task = self._xhs_task()
-            task.append_trace('image_review_BLOCKED', {
-                'reason': 'missing_reference_images',
-                'image': image, 'hint': hint, 'refs_count': len(refs) if refs else 0,
-            })
-            yield f'[Block] 审图被拒：缺少 reference_images（仅 {len(refs) if refs else 0} 张）\n'
-            return StepOutcome({'status': 'error', 'msg': err}, next_prompt='\n')
-
-        ref_tag = f' (+{len(refs)} 张爆款参考)'
+        ref_tag = f' (+{len(refs)} 张爆款参考)' if refs else ' (单图诊断)'
         yield f'[Action] 严格档审图{ref_tag}: {image[:80]}\n'
         task = self._xhs_task()
         task.append_trace('image_review_start', {'image': image, 'hint': hint, 'refs': refs})
@@ -2351,18 +2379,12 @@ class GenericAgentHandler(BaseHandler):
 
 
     def do_xhs_image_edit(self, args, response):
-        '''调 Seedream 4.5 (i2i) 修图。返回修后图本地路径。'''
+        '''调用配置的图像编辑模型，返回修后图本地路径。'''
         image = args.get('image', '')
         edit_prompts = args.get('edit_prompts') or []
         save_path = args.get('save_path') or None
         if not image or not edit_prompts:
             return StepOutcome({'status': 'error', 'msg': 'image 与 edit_prompts 均必填'}, next_prompt='\n')
-
-        # 🚦 SOP gate：P 图前必须先读 xhs_edit_sop
-        _gate = self._xhs_sop_gate('xhs_image_edit', args)
-        if _gate is not None:
-            yield '[Block] P 图前未读 xhs_edit_sop.md，已拦截\n'
-            return _gate
 
         # 🚦 硬 gate：连续 ≥2 轮 edit 没 PASS 必须降级 REPHOTO
         task = self._xhs_task()
@@ -2406,7 +2428,7 @@ class GenericAgentHandler(BaseHandler):
                     task.append_trace('image_edit_force_original', {'passed_in': image, 'corrected_to': orig})
                     image = orig
 
-        yield f'[Action] Seedream 4.5 修图 (round {edit_count + 1}): {image[:80]} ({len(edit_prompts)} 条指令)\n'
+        yield f'[Action] 图像编辑 (round {edit_count + 1}): {image[:80]} ({len(edit_prompts)} 条指令)\n'
         task.append_trace(f'image_edit_round_{edit_count + 1}_start', task._trim({
             'image': image, 'edit_prompts': edit_prompts, 'save_path': save_path,
         }))
@@ -2424,18 +2446,13 @@ class GenericAgentHandler(BaseHandler):
 
 
     def do_xhs_image_generate(self, args, response):
-        '''调 Seedream 4.5 (t2i) 文生图。返回生成图本地路径。'''
+        '''调用配置的图像生成模型，返回生成图本地路径。'''
         prompt = args.get('prompt', '')
         size = args.get('size', '2K')
         save_path = args.get('save_path') or None
         if not prompt:
             return StepOutcome({'status': 'error', 'msg': 'prompt 必填'}, next_prompt='\n')
-        # 🚦 SOP gate：生图前必须先读 xhs_edit_sop
-        _gate = self._xhs_sop_gate('xhs_image_generate', args)
-        if _gate is not None:
-            yield '[Block] 生图前未读 xhs_edit_sop.md，已拦截\n'
-            return _gate
-        yield f'[Action] Seedream 4.5 生图: {prompt[:60]}... (size={size})\n'
+        yield f'[Action] 图像生成: {prompt[:60]}... (size={size})\n'
         task = self._xhs_task()
         task.append_trace('image_generate_start', task._trim({'prompt': prompt, 'size': size}))
         try:
@@ -2452,397 +2469,50 @@ class GenericAgentHandler(BaseHandler):
 
 
     def do_xhs_publish_note(self, args, response):
-        '''发笔记到小红书创作中心 https://creator.xiaohongshu.com/publish/publish
-        极简签名：images / title / desc / tags。
-        新流程（2026-06，取代旧草稿箱/暂存离开——因手机端电脑端草稿不互通）：
-        上传图文 → 填标题/正文/话题 → CDP 穿透设「仅自己可见」→ 验证通过后直接点「发布」。
-        🚦 硬纪律：可见性未确认为「仅自己可见」绝不点发布，以防误公开。
-        前置：CDP bridge 已接管 Chrome、creator 已登录、Chrome 窗口需在前台聚焦
-        （cdp_mouse_click 依赖窗口聚焦，后台会被合成器丢弃输入事件）。
-        '''
-        images = args.get('images') or []
-        title = (args.get('title') or '').strip()
-        desc = (args.get('desc') or '').strip()
-        tags = args.get('tags') or []
-        if not images or not title or not desc:
-            return StepOutcome({'status': 'error', 'msg': 'images / title / desc 均必填'}, next_prompt='\n')
-        if not isinstance(images, list) or not all(isinstance(p, str) and p for p in images):
-            return StepOutcome({'status': 'error', 'msg': 'images 必须是非空字符串列表'}, next_prompt='\n')
-        # 检查图片都存在
-        missing = [p for p in images if not os.path.isfile(p)]
-        if missing:
-            return StepOutcome({'status': 'error', 'msg': f'图片不存在: {missing}'}, next_prompt='\n')
-        # 🚦 SOP gate：发草稿前必须先读 xhs_publish_sop
-        _gate = self._xhs_sop_gate('xhs_publish_note', args)
-        if _gate is not None:
-            yield '[Block] 发草稿前未读 xhs_publish_sop.md，已拦截\n'
-            return _gate
-        # tags 自动加 # 前缀（用户传 ['美食','早餐'] 或 ['#美食','#早餐'] 都接受）
-        norm_tags = []
-        for t in tags:
-            if not isinstance(t, str): continue
-            t = t.strip().lstrip('#')
-            if t: norm_tags.append('#' + t)
+        return (yield from self._publish_extended(args, response, preview=bool(args.get('preview'))))
 
+    def do_xhs_prepare_note(self, args, response):
+        return (yield from self._publish_extended(args, response, preview=True))
+
+    def do_xhs_publish_video(self, args, response):
+        if not args.get('video'):
+            return StepOutcome({'status': 'error', 'msg': 'video 必填'}, next_prompt='\n')
+        return (yield from self._publish_extended(args, response, preview=bool(args.get('preview'))))
+
+    def do_xhs_publish_longform(self, args, response):
+        if not args.get('longform_body'):
+            return StepOutcome({'status': 'error', 'msg': 'longform_body 必填'}, next_prompt='\n')
+        return (yield from self._publish_extended(args, response, preview=bool(args.get('preview'))))
+
+    def do_xhs_publish_podcast(self, args, response):
+        if not args.get('audio') or not args.get('cover'):
+            return StepOutcome({'status': 'error', 'msg': 'audio与cover必填'}, next_prompt='\n')
+        return (yield from self._publish_extended(args, response, preview=bool(args.get('preview'))))
+
+    def _publish_extended(self, args, response, preview=False):
+        from tools import xhs_publish
         task = self._xhs_task()
-        td = task.get_current()
-        if not td:
-            return StepOutcome({'status': 'error', 'msg': '请先调 xhs_task_init'}, next_prompt='\n')
-
-        yield f'[Action] 发草稿到创作中心: {len(images)} 张图, title={title[:40]}, {len(norm_tags)} 个 tag\n'
-        task.append_trace('publish_draft_start', task._trim({
-            'images': images, 'title': title, 'desc': desc,
-            'desc_len': len(desc), 'tags': norm_tags,
-        }))
-
-        # 0) 关键：先把 default tab 切到小红书页（否则 web_execute_js 发到错误 tab，操作全部落空）
-        tab_info = ensure_xhs_tab(want_creator=True)
-        yield f'  [0] 选中小红书 tab: ok={tab_info.get("ok")}, url={(tab_info.get("url") or "")[:50]}, reason={tab_info.get("reason")}\n'
-        task.append_trace('publish_draft_tab', tab_info)
-        if not tab_info.get('ok'):
-            return StepOutcome({'status': 'error',
-                'msg': f'找不到/打不开小红书标签页（reason={tab_info.get("reason")}）。请在被 CDP 桥接的 Chrome 里打开并登录小红书创作中心后重试。'},
-                next_prompt='\n')
-
-        # 1) 跳转创作中心发布页（用模块级 web_execute_js）
-        # 关键：必须带 target=image 锁死图文页，否则默认会进 target=video（亲测踩过）
+        kind = '长文' if args.get('longform_body') else '播客' if args.get('audio') else '视频' if args.get('video') else '图文'
+        yield f"[Action] {'保存草稿' if args.get('save_draft') else '预填' if preview else '发布'}小红书{kind}，可见性={args.get('visibility', 'self')}\n"
         try:
-            nav_js = (
-                "(function(){"
-                "  const u='https://creator.xiaohongshu.com/publish/publish?source=official&from=menu&target=image';"
-                "  if(location.href.indexOf('target=image')<0){location.href=u;return 'navigating_to_image_tab';}"
-                "  return 'already_on_image_tab';"
-                "})();"
-            )
-            r = web_execute_js(nav_js)
-            yield f'  [1/6] 跳创作中心(图文): {self._js_ret(r)}\n'
-            time.sleep(4.0)  # 创作中心比主站慢
-        except Exception as e:
-            traceback.print_exc()
-            task.append_trace('publish_draft_error', {'phase': 'navigate', 'error': str(e)})
-            return StepOutcome({'status': 'error', 'msg': f'跳转创作中心失败: {e}'}, next_prompt='\n')
-
-        # 2) 二次确认在图文页（万一 target=image 也被服务端忽略，再用文本点 tab 兜底）
-        try:
-            tab_js = (
-                "(function(){"
-                "  if(location.href.indexOf('target=video')>=0){"
-                "    function realClick(el){"
-                "      const r=el.getBoundingClientRect();"
-                "      const o={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};"
-                "      el.dispatchEvent(new MouseEvent('mouseover',o));"
-                "      el.dispatchEvent(new MouseEvent('mousedown',o));"
-                "      el.dispatchEvent(new MouseEvent('mouseup',o));"
-                "      el.dispatchEvent(new MouseEvent('click',o));"
-                "    }"
-                "    const all=Array.from(document.querySelectorAll('div,span,a,button'));"
-                "    for(const t of all){"
-                "      const tx=(t.innerText||'').trim();"
-                "      if(tx==='上传图文'||tx==='发图文'){realClick(t);return 'switched_via_text:'+tx;}"
-                "    }"
-                "    return 'still_on_video_tab_no_text_match';"
-                "  }"
-                "  return 'on_image_tab_via_url';"
-                "})();"
-            )
-            r = web_execute_js(tab_js)
-            yield f'  [2/6] 校验图文 tab: {self._js_ret(r)}\n'
-            time.sleep(1.2)
-        except Exception:
-            pass
-
-        # 3) 上传图片：CDP DOM.setFileInputFiles（传本地路径，payload 极小，稳）。
-        # 历史教训：原先用 JS DataTransfer + 内联 base64，大 payload 经 WS 回传时 JSON 解析必崩
-        # （'Expecting value'），async 返回 Promise 也序列化不稳 → 上传步骤误判失败 → 整个发布流程
-        # 在第 3 步就 abort，永远走不到后面填标题/暂存。改用 setFileInputFiles + 轮询编辑器出现判定。
-        try:
-            up = cdp_upload_files_to_input(images)
-            if not up.get('ok'):
-                raise RuntimeError(up.get('reason'))
-            # 上传成功判定：轮询等标题框/正文编辑器出现（不看 JS 返回值）
-            appeared = cdp_wait_publish_editor(timeout=8.0 + 1.0 * len(images))
-            yield f'  [3/6] 上传 {len(images)} 张(CDP setFileInputFiles): editor_appeared={appeared}\n'
-            if not appeared:
-                raise RuntimeError('上传后编辑器未出现（标题框/正文编辑器轮询超时）')
-        except Exception as e:
-            traceback.print_exc()
-            task.append_trace('publish_draft_error', {'phase': 'upload', 'error': str(e)})
-            return StepOutcome({'status': 'error', 'msg': f'上传图片失败: {e}'}, next_prompt='\n')
-
-        # 4) 填标题
-        try:
-            title_js = (
-                "(function(t){"
-                # 实测：发布页有多个 input.d-text（标题 + 若干 --color-text-title 输入框），
-                # 必须用 placeholder 精确锁定真正的标题框，否则会误写到别的 d-text。
-                "  const sels=['input.d-text[placeholder*=\"填写标题\"]','input[placeholder*=\"标题\"]','input.d-text','input.titleInput','input[type=\"text\"]'];"
-                "  for(const s of sels){"
-                "    const el=document.querySelector(s);"
-                "    if(el && el.offsetParent!==null){"
-                "      const setter=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;"
-                "      setter.call(el,t);"
-                "      el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "      el.dispatchEvent(new Event('change',{bubbles:true}));"
-                "      el.dispatchEvent(new Event('blur',{bubbles:true}));"
-                "      return 'title_filled:'+s;"
-                "    }"
-                "  }"
-                "  return 'title_input_not_found';"
-                "})(" + json.dumps(title) + ");"
-            )
-            r = web_execute_js(title_js)
-            yield f'  [4/6] 填标题: {self._js_ret(r)}\n'
-            time.sleep(0.4)
-            # 视觉兜底：selector 没找到标题输入框 → 调 VLM 截图定位
-            if 'title_input_not_found' in str(self._js_ret(r)):
-                try:
-                    yield '  [4.5/6] selector 失败，走 visual fallback ...\n'
-                    from tools.web_vision import visual_fill
-                    vr = visual_fill(
-                        '小红书发布页中央的"标题"输入框，placeholder 是"填写标题会有更多赞哦"',
-                        title,
-                    )
-                    yield f'  [4.5/6] visual 填标题: ok={vr.get("ok")}, len={vr.get("len")}\n'
-                    time.sleep(0.4)
-                except Exception as ve:
-                    task.append_trace('publish_draft_warn', {'phase': 'title_visual', 'error': str(ve)})
-        except Exception as e:
-            task.append_trace('publish_draft_warn', {'phase': 'title', 'error': str(e)})
-
-        # 5) 填正文 + tags（contenteditable 富文本）
-        # 小红书富文本是 tiptap/ProseMirror/Quill：直接 innerText 赋值会被覆盖，必须 focus + execCommand insertText
-        try:
-            # 正文只填 desc；话题标签在 5.6 阶段单独走真 chip 流程（输入#词→点话题下拉），
-            # 不能把 #词 当纯文本拼进正文，否则只是死文字、点不开（亲测踩过的 bug）
-            full_text = desc
-            desc_js = (
-                "(function(text){"
-                "  const sels=["
-                "    'div.tiptap.ProseMirror',"           # 小红书创作中心实测
-                "    'div.tiptap',"
-                "    'div.ProseMirror',"
-                "    'div.ql-editor',"
-                "    '[role=\"textbox\"][contenteditable]',"
-                "    'div[contenteditable=\"true\"]',"
-                "    '.editor-content [contenteditable]',"
-                "    '.editor [contenteditable]'"
-                "  ];"
-                "  for(const s of sels){"
-                "    const els=Array.from(document.querySelectorAll(s));"
-                "    for(const el of els){"
-                "      if(!el || el.offsetParent===null) continue;"
-                "      const r=el.getBoundingClientRect();"
-                "      if(r.width<200||r.height<60) continue;"  # 跳过标题那种小的 contenteditable
-                "      el.focus();"
-                "      el.click();"
-                "      try{document.execCommand('selectAll',false,null);}catch(e){}"
-                "      try{document.execCommand('delete',false,null);}catch(e){}"
-                "      let ok=false;"
-                "      try{ok=document.execCommand('insertText',false,text);}catch(e){}"
-                "      if(!ok){"
-                "        el.innerText=text;"
-                "        el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));"
-                "      }"
-                "      el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "      el.dispatchEvent(new Event('change',{bubbles:true}));"
-                "      el.dispatchEvent(new Event('blur',{bubbles:true}));"
-                "      const got=(el.innerText||'').length;"
-                "      return 'desc_filled:'+s+'(method='+(ok?'execCommand':'innerText')+',len='+got+')';"
-                "    }"
-                "  }"
-                # 失败时 dump 一下页面里所有 contenteditable 的尺寸/类名
-                "  const dump=Array.from(document.querySelectorAll('[contenteditable]')).map(el=>{"
-                "    const r=el.getBoundingClientRect();"
-                "    return el.tagName+'.'+(el.className||'').toString().slice(0,40)+'('+Math.round(r.width)+'x'+Math.round(r.height)+',vis='+(el.offsetParent!==null)+')';"
-                "  });"
-                "  return 'desc_editor_not_found|dump='+JSON.stringify(dump).slice(0,500);"
-                "})(" + json.dumps(full_text) + ");"
-            )
-            r = web_execute_js(desc_js)
-            yield f'  [5/6] 填正文+tags: {self._js_ret(r)}\n'
-            time.sleep(0.6)
-            # 视觉兜底：selector 没找到正文编辑器 → 调 VLM 截图定位
-            if 'desc_editor_not_found' in str(self._js_ret(r)):
-                try:
-                    yield '  [5.5/6] selector 失败，走 visual fallback ...\n'
-                    from tools.web_vision import visual_fill
-                    vr = visual_fill(
-                        '小红书发布页大块的正文富文本编辑器（tiptap），通常在标题下方',
-                        full_text,
-                    )
-                    yield f'  [5.5/6] visual 填正文: ok={vr.get("ok")}, len={vr.get("len")}\n'
-                    time.sleep(0.6)
-                except Exception as ve:
-                    task.append_trace('publish_draft_warn', {'phase': 'desc_visual', 'error': str(ve)})
-        except Exception as e:
-            task.append_trace('publish_draft_warn', {'phase': 'desc', 'error': str(e)})
-
-        # 5.6) 逐个添加真话题标签 chip（不是死文字！）
-        # 小红书话题：富文本里输入 '#'+词 → 弹话题下拉框 → 点选第一项才变成蓝色可点 chip。
-        # 直接把 '#词' 当纯文本写进正文只是死字符串，点不开。CDP insertText 触发真实 input 才能唤起下拉。
-        if norm_tags:
-            try:
-                from tools.web_vision import visual_click
-            except Exception:
-                visual_click = None
-            focus_js = (
-                "(function(){"
-                "  const sels=['div.tiptap.ProseMirror','div.tiptap','div.ProseMirror',"
-                "    '[role=\"textbox\"][contenteditable]','div[contenteditable=\"true\"]'];"
-                "  let ed=null;"
-                "  for(const s of sels){const els=Array.from(document.querySelectorAll(s));"
-                "    for(const el of els){if(el.offsetParent===null)continue;"
-                "      const r=el.getBoundingClientRect();if(r.width<200||r.height<60)continue;ed=el;break;}"
-                "    if(ed)break;}"
-                "  if(!ed)return 'editor_not_found';"
-                "  ed.focus();"
-                "  const sel=window.getSelection();const range=document.createRange();"
-                "  range.selectNodeContents(ed);range.collapse(false);"
-                "  sel.removeAllRanges();sel.addRange(range);"
-                "  try{document.execCommand('insertText',false,' ');}catch(e){}"
-                "  return 'focused';"
-                "})();"
-            )
-            pick_js = (
-                "(function(){"
-                "  const conts=Array.from(document.querySelectorAll("
-                "    '[class*=\"mention\"],[class*=\"topic\"],[class*=\"suggest\"],"
-                "     [class*=\"dropdown\"],.tribute-container,[role=\"listbox\"]'));"
-                "  for(const c of conts){"
-                "    if(c.offsetParent===null)continue;"
-                "    const items=Array.from(c.querySelectorAll('li,[role=\"option\"],[class*=\"item\"],div'))"
-                "      .filter(e=>e.offsetParent!==null && (e.innerText||'').trim());"
-                "    if(items.length){"
-                "      const it=items[0];const r=it.getBoundingClientRect();"
-                "      const o={bubbles:true,cancelable:true,view:window,"
-                "        clientX:r.left+r.width/2,clientY:r.top+r.height/2,button:0};"
-                "      it.dispatchEvent(new MouseEvent('mousedown',o));"
-                "      it.dispatchEvent(new MouseEvent('mouseup',o));"
-                "      it.dispatchEvent(new MouseEvent('click',o));"
-                "      return 'picked:'+(it.innerText||'').trim().slice(0,20);"
-                "    }"
-                "  }"
-                "  return 'dropdown_not_found';"
-                "})();"
-            )
-            picked_cnt = 0
-            for raw_tag in norm_tags:
-                word = raw_tag.lstrip('#').strip()
-                if not word:
-                    continue
-                try:
-                    fr = web_execute_js(focus_js)
-                    if 'editor_not_found' in str(self._js_ret(fr)):
-                        yield '  [5.6] 话题：找不到编辑器，跳过\n'
-                        break
-                    # CDP 真实输入 '#'+词 唤起话题下拉
-                    cdp_type_text('#' + word)
-                    time.sleep(1.5)
-                    # 发送回车键尝试选中第一个话题
-                    cdp_send('Input.dispatchKeyEvent', {'type': 'rawKeyDown', 'windowsVirtualKeyCode': 13, 'key': 'Enter', 'text': '\r'})
-                    cdp_send('Input.dispatchKeyEvent', {'type': 'char', 'windowsVirtualKeyCode': 13, 'key': 'Enter', 'text': '\r'})
-                    cdp_send('Input.dispatchKeyEvent', {'type': 'keyUp', 'windowsVirtualKeyCode': 13, 'key': 'Enter'})
-                    time.sleep(0.5)
-                    # 额外发一个空格避免粘连
-                    cdp_type_text(' ')
-                    time.sleep(0.5)
-                    
-                    pr = web_execute_js(pick_js)
-                    picked = str(self._js_ret(pr))
-                    
-                    # 如果 js 点击还是没找到，但可能回车已经生效了，所以只要回车后没有遗留下拉框，也算成功
-                    if 'dropdown_not_found' in picked:
-                        picked = 'picked_by_enter_or_fallback'
-                    if 'dropdown_not_found' in picked and visual_click is not None:
-                        try:
-                            vr = visual_click(
-                                '话题下拉框里第一个候选话题项（形如 #%s 的蓝色条目）' % word)
-                            picked = 'visual:' + str(vr.get('ok'))
-                        except Exception:
-                            pass
-                    if picked.startswith('picked') or picked.startswith('visual:True'):
-                        picked_cnt += 1
-                    yield f'  [5.6] 话题 #{word}: {picked}\n'
-                    time.sleep(0.6)
-                except Exception as te:
-                    task.append_trace('publish_draft_warn', {'phase': 'tag', 'tag': word, 'error': str(te)})
-            yield f'  [5.6] 话题标签完成: {picked_cnt}/{len(norm_tags)} 个变成 chip\n'
-
-        # 6) 先派一轮 input/blur，确保 React 已感知内容变更（发布按钮才会 enable）
-        try:
-            trigger_js = (
-                "(function(){"
-                "  const eds=Array.from(document.querySelectorAll('[contenteditable]')).filter(el=>el.offsetParent!==null);"
-                "  eds.forEach(el=>{"
-                "    el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "    el.dispatchEvent(new Event('change',{bubbles:true}));"
-                "  });"
-                "  const ips=Array.from(document.querySelectorAll('input')).filter(el=>el.offsetParent!==null);"
-                "  ips.forEach(el=>{"
-                "    el.dispatchEvent(new Event('input',{bubbles:true}));"
-                "    el.dispatchEvent(new Event('change',{bubbles:true}));"
-                "  });"
-                "  return 'inputs_touched:'+eds.length+'_'+ips.length;"
-                "})();"
-            )
-            web_execute_js(trigger_js)
-            time.sleep(1.0)
-        except Exception:
-            pass
-
-        # 7) ⭐ CDP 穿透固化「仅自己可见」。这是发布前的硬纪律——未确认 self 绝不点发布。
-        # （历史教训：靠 VLM 逐篇点可见性 4 篇错 2 篇，且"公开可见"描述被误判成"发布"直接公开发出去）
-        vis = cdp_set_xhs_visibility('self')
-        task.append_trace('publish_visibility', vis)
-        yield f"  [7] 设可见性「仅自己可见」: ok={vis.get('ok')}, now={vis.get('now')}, reason={vis.get('reason','')}\n"
-        if not vis.get('ok'):
-            return StepOutcome({
-                'status': 'error',
-                'msg': f"可见性未能确认为「仅自己可见」（now={vis.get('now')}, reason={vis.get('reason')}），"
-                       f"为防误公开已中止发布。请确认 Chrome 窗口在前台聚焦后重试。",
-                'visibility': vis,
-            }, next_prompt='\n')
-
-        # 8) 直接点「发布」按钮（closed shadow 穿透拿坐标 + CDP 物理点击）
-        click_result = None
-        try:
-            btn = cdp_find_xhs_publish_bar_btn()
-            if not btn.get('ok'):
-                return StepOutcome({
-                    'status': 'error',
-                    'msg': f"已设仅自己可见但未定位到发布按钮（{btn.get('reason')}）。",
-                    'visibility': vis,
-                }, next_prompt='\n')
-            click_ret = cdp_mouse_click(btn['x'], btn['y'])
-            if isinstance(click_ret, dict) and click_ret.get('error'):
-                return StepOutcome({
-                    'status': 'error',
-                    'msg': f"发布按钮 CDP 点击报错: {click_ret.get('error')}",
-                    'visibility': vis,
-                }, next_prompt='\n')
-            yield f"  [8] 已点「发布」按钮 @({btn['x']},{btn['y']})（closed shadow 穿透）\n"
-            time.sleep(4.0)  # 等发布提交 + 页面跳转
-            click_result = 'published_self_visible'
-        except Exception as e:
-            traceback.print_exc()
-            task.append_trace('publish_draft_error', {'phase': 'publish_click', 'error': str(e)})
-            return StepOutcome({'status': 'error', 'msg': f'点发布按钮失败: {e}', 'visibility': vis}, next_prompt='\n')
-
-        yield f'  ✅ 已以「仅自己可见」发布。手机端可见（电脑端草稿不互通，故直接发布）。\n'
-
-        task.append_trace('publish_draft_done', {
-            'click_result': click_result,
-            'visibility': vis.get('now'),
-            'images_count': len(images),
-            'tags_count': len(norm_tags),
-        })
-        next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
-        return StepOutcome({
-            'status': 'ok',
-            'click_result': click_result,
-            'visibility': vis.get('now'),
-            'message': '已以「仅自己可见」直接发布（不再走草稿箱）。',
-        }, next_prompt=next_prompt)
+            result = xhs_publish.publish(args, task, preview=preview)
+        except xhs_publish.PublicationJournalError as exc:
+            task.append_trace('publish_journal_error', {'error': str(exc)})
+            return StepOutcome({'status': 'unverified', 'ok': False, 'msg': str(exc)},
+                               next_prompt='', should_exit=True)
+        except Exception as exc:
+            task.append_trace('publish_error', {'error': str(exc)})
+            from tools.xhs_test_control import TestDeferred
+            if isinstance(exc, TestDeferred):
+                return StepOutcome(exc.result, next_prompt='', should_exit=True)
+            from tools.xhs_account import AccountRestricted
+            if isinstance(exc, AccountRestricted):
+                return StepOutcome({'status': 'restricted', 'ok': False, 'msg': str(exc),
+                                    'account_access': exc.state}, next_prompt='', should_exit=True)
+            return StepOutcome({'status': 'error', 'msg': str(exc)}, next_prompt='\n')
+        if result.get('status') in {'unverified', 'deferred'}:
+            return StepOutcome(result, next_prompt='', should_exit=True)
+        return StepOutcome(result, next_prompt=self._get_anchor_prompt(skip=args.get('_index', 0) > 0))
 
         # ───────────────────────── 数据读取 / 互动（稳定 selector + __INITIAL_STATE__，零 VLM） ─────────────────────────
     def do_web_visual_click(self, args, response):
@@ -2928,7 +2598,7 @@ class GenericAgentHandler(BaseHandler):
 
     def do_xhs_check_login(self, args, response):
         '''检查小红书登录状态（读 __INITIAL_STATE__ 用户态，零 VLM）。'''
-        a = self._xhs_actions()
+        a = self._xhs_actions(args)
         task = self._xhs_task(); task.ensure_task(hint='check_login')
         task.append_trace('check_login_start', {})
         try:
@@ -2942,11 +2612,144 @@ class GenericAgentHandler(BaseHandler):
         next_prompt = self._get_anchor_prompt(skip=args.get('_index', 0) > 0)
         return StepOutcome({'status': 'ok' if r.get('ok') else 'fail', **r}, next_prompt=next_prompt)
 
+    def _xhs_operation(self, name, args):
+        from tools import xhs_manage, xhs_queue
+        task = self._xhs_task()
+        task.ensure_task(hint=name)
+        task.append_trace(name + '_start', {key: value for key, value in args.items()
+                                          if key not in {'xsec_token', 'verification_code', '_index'}})
+        try:
+            if name == 'notifications':
+                result = xhs_manage.notifications(args.get('kind', 'comments'), args.get('pages', 1),
+                                                 transport=args.get('transport', 'auto'))
+            elif name == 'follow_user':
+                result = xhs_manage.follow_user(args.get('user_id'), args.get('xsec_token', ''),
+                                                bool(args.get('unfollow')), args.get('xsec_source', 'pc_note'))
+            elif name == 'own_profile':
+                result = xhs_manage.own_profile(transport=args.get('transport', 'auto'))
+            elif name == 'creator_page':
+                result = xhs_manage.open_area(args.get('area', 'notes'), transport=args.get('transport', 'auto'))
+            elif name == 'manage_note':
+                result = xhs_manage.manage_note(args, task)
+            elif name in {'drafts', 'collections', 'rss'}:
+                from tools import xhs_library
+                result = getattr(xhs_library, name)(args, task)
+            elif name == 'messages':
+                from tools import xhs_messages
+                result = xhs_messages.operate(args, task)
+            elif name == 'test_account':
+                from tools import xhs_test_control
+                result = xhs_test_control.operate(args)
+            elif name == 'desktop_interact':
+                from tools import xhs_interact_desktop
+                result = xhs_interact_desktop.operate(args, task)
+            elif name == 'content_queue':
+                action = args.get('action', 'list')
+                if action == 'enqueue':
+                    result = xhs_queue.enqueue(args, task)
+                elif action == 'list':
+                    result = xhs_queue.list_items(task, args.get('state'))
+                elif action == 'cancel':
+                    result = xhs_queue.cancel(args.get('item_id'), task)
+                elif action == 'retry':
+                    result = xhs_queue.retry(args.get('item_id'), task)
+                elif action == 'run_due':
+                    result = xhs_queue.run_due(task, args.get('limit', 1))
+                elif action == 'reconcile':
+                    result = xhs_queue.reconcile(args.get('item_id'), args.get('note_id'), task)
+                else:
+                    raise ValueError('未知队列动作')
+            else:
+                raise ValueError('未知运营动作')
+        except Exception as exc:
+            task.append_trace(name + '_error', {'error': str(exc)})
+            from tools.xhs_test_control import TestDeferred
+            if isinstance(exc, TestDeferred):
+                return StepOutcome(exc.result, next_prompt='', should_exit=True)
+            from tools.xhs_account import AccountRestricted
+            if isinstance(exc, AccountRestricted):
+                return StepOutcome({'status': 'restricted', 'ok': False, 'msg': str(exc),
+                                    'account_access': exc.state}, next_prompt='', should_exit=True)
+            from tools.xhs_publish import PublicationJournalError
+            if isinstance(exc, PublicationJournalError):
+                return StepOutcome({'status': 'unverified', 'msg': str(exc)}, next_prompt='', should_exit=True)
+            return StepOutcome({'status': 'error', 'msg': str(exc)}, next_prompt='\n')
+        task.append_trace(name + '_done', task._trim(result))
+        result.setdefault('status', 'ok' if result.get('ok') else 'fail')
+        uncertain = result.get('status') in {'unverified', 'restricted', 'deferred'} or any(
+            row.get('state') == 'uncertain' for row in result.get('results', []))
+        return StepOutcome(result, next_prompt='' if uncertain else '\n', should_exit=uncertain)
+
+    def do_xhs_notifications(self, args, response):
+        return self._xhs_operation('notifications', args)
+
+    def do_xhs_follow_user(self, args, response):
+        desktop = self._desktop_interaction(args, 'follow', args.get('unfollow', False))
+        if desktop is not None:
+            return desktop
+        return self._xhs_operation('follow_user', args)
+
+    def do_xhs_own_profile(self, args, response):
+        return self._xhs_operation('own_profile', args)
+
+    def do_xhs_test_account(self, args, response):
+        return self._xhs_operation('test_account', args)
+
+    def do_xhs_creator_page(self, args, response):
+        return self._xhs_operation('creator_page', args)
+
+    def do_xhs_manage_note(self, args, response):
+        return self._xhs_operation('manage_note', args)
+
+    def do_xhs_messages(self, args, response):
+        return self._xhs_operation('messages', args)
+
+    def do_xhs_drafts(self, args, response):
+        return self._xhs_operation('drafts', args)
+
+    def do_xhs_collections(self, args, response):
+        return self._xhs_operation('collections', args)
+
+    def do_xhs_rss(self, args, response):
+        return self._xhs_operation('rss', args)
+
+    def do_xhs_content_queue(self, args, response):
+        # Queue may publish, so its gate is the publication capability.
+        return self._xhs_operation('content_queue', args)
+
+    def _desktop_interaction(self, args, action, remove=False):
+        try:
+            from tools.xhs_test_control import status
+            from tools.xhs_publish import select_transport
+            requested = args.get('transport', 'auto')
+            selected = 'desktop' if status().get('enabled') and requested != 'cdp' else select_transport(requested)
+            if selected != 'desktop':
+                return None
+        except Exception as exc:
+            return StepOutcome({'status': 'error', 'msg': str(exc)}, next_prompt='\n')
+        payload = {**args, 'action': action, 'remove': bool(remove)}
+        if action == 'comment':
+            payload['action'] = {'prepare': 'prepare_comment', 'clear': 'clear_comment',
+                                 'send': 'comment'}.get(args.get('action', 'send'), '')
+        elif action == 'reply':
+            payload['action'] = {'prepare': 'prepare_reply', 'clear': 'clear_comment',
+                                 'send': 'reply'}.get(args.get('action', 'send'), '')
+        return self._xhs_operation('desktop_interact', payload)
+
+    def do_web_desktop(self, args, response):
+        """Operate existing Chrome with macOS accessibility and normal key input."""
+        from tools.mac_browser import operate
+        try:
+            result = operate(args)
+            return StepOutcome(result, next_prompt='\n')
+        except Exception as exc:
+            return StepOutcome({'status': 'error', 'msg': str(exc)}, next_prompt='\n')
+
 
     def do_xhs_list_feeds(self, args, response):
         '''获取小红书首页推荐流（读 __INITIAL_STATE__.feed.feeds）。返回精简的笔记列表，
         含 id / xsec_token（后续 get_feed_detail / 点赞 / 收藏 / 评论都需要这两个参数）。'''
-        a = self._xhs_actions()
+        a = self._xhs_actions(args)
         task = self._xhs_task(); task.ensure_task(hint='list_feeds')
         task.append_trace('list_feeds_start', {})
         try:
@@ -2970,7 +2773,7 @@ class GenericAgentHandler(BaseHandler):
         if not keyword:
             return StepOutcome({'status': 'error', 'msg': 'keyword 必填'}, next_prompt='\n')
         filters = args.get('filters') or None
-        a = self._xhs_actions()
+        a = self._xhs_actions(args)
         task = self._xhs_task(); task.ensure_task(hint=f'search {keyword}'[:40])
         task.append_trace('search_feeds_start', {'keyword': keyword, 'filters': filters})
         try:
@@ -3006,7 +2809,7 @@ class GenericAgentHandler(BaseHandler):
             return StepOutcome({'status': 'error', 'msg': 'feed_id 和 xsec_token 必填'}, next_prompt='\n')
         load_comments = bool(args.get('load_comments', True))
         xsec_source = (args.get('xsec_source') or 'pc_feed').strip()
-        a = self._xhs_actions()
+        a = self._xhs_actions(args)
         task = self._xhs_task(); task.ensure_task(hint=f'detail {feed_id}'[:40])
         task.append_trace('get_feed_detail_start', {'feed_id': feed_id, 'load_comments': load_comments})
         try:
@@ -3034,10 +2837,10 @@ class GenericAgentHandler(BaseHandler):
         必填 user_id + xsec_token（从笔记/搜索结果里拿）。'''
         user_id = (args.get('user_id') or '').strip()
         xsec_token = (args.get('xsec_token') or '').strip()
-        if not user_id or not xsec_token:
+        if not user_id:
             return StepOutcome({'status': 'error', 'msg': 'user_id 和 xsec_token 必填'}, next_prompt='\n')
         xsec_source = (args.get('xsec_source') or 'pc_note').strip()
-        a = self._xhs_actions()
+        a = self._xhs_actions(args)
         task = self._xhs_task(); task.ensure_task(hint=f'profile {user_id}'[:40])
         task.append_trace('user_profile_start', {'user_id': user_id})
         try:
@@ -3056,6 +2859,9 @@ class GenericAgentHandler(BaseHandler):
     def do_xhs_like_feed(self, args, response):
         '''点赞 / 取消点赞（selector 优先 + 状态校验，已是目标态则跳过）。
         必填 feed_id + xsec_token；unlike=true 为取消点赞。'''
+        desktop = self._desktop_interaction(args, 'like', args.get('unlike', False))
+        if desktop is not None:
+            return desktop
         feed_id = (args.get('feed_id') or '').strip()
         xsec_token = (args.get('xsec_token') or '').strip()
         if not feed_id or not xsec_token:
@@ -3080,6 +2886,9 @@ class GenericAgentHandler(BaseHandler):
     def do_xhs_favorite_feed(self, args, response):
         '''收藏 / 取消收藏（selector 优先 + 状态校验）。
         必填 feed_id + xsec_token；unfavorite=true 为取消收藏。'''
+        desktop = self._desktop_interaction(args, 'favorite', args.get('unfavorite', False))
+        if desktop is not None:
+            return desktop
         feed_id = (args.get('feed_id') or '').strip()
         xsec_token = (args.get('xsec_token') or '').strip()
         if not feed_id or not xsec_token:
@@ -3103,6 +2912,11 @@ class GenericAgentHandler(BaseHandler):
 
     def do_xhs_post_comment(self, args, response):
         '''发表评论到笔记（selector 优先）。必填 feed_id + xsec_token + content。'''
+        desktop = self._desktop_interaction(args, 'comment')
+        if desktop is not None:
+            return desktop
+        if args.get('action', 'send') != 'send':
+            return StepOutcome({'status': 'error', 'msg': 'CDP_comment_prepare_not_supported'}, next_prompt='\n')
         feed_id = (args.get('feed_id') or '').strip()
         xsec_token = (args.get('xsec_token') or '').strip()
         content = args.get('content') or ''
@@ -3127,6 +2941,9 @@ class GenericAgentHandler(BaseHandler):
     def do_xhs_reply_comment(self, args, response):
         '''回复笔记下的指定评论（selector 优先 + 滚动定位）。
         必填 feed_id + xsec_token + content，且 comment_id 或 user_id 至少一个。'''
+        desktop = self._desktop_interaction(args, 'reply')
+        if desktop is not None:
+            return desktop
         feed_id = (args.get('feed_id') or '').strip()
         xsec_token = (args.get('xsec_token') or '').strip()
         content = args.get('content') or ''
@@ -3166,7 +2983,10 @@ class GenericAgentHandler(BaseHandler):
                 {'status': 'error', 'msg': 'skill_name 仅允许 2-64 位小写字母、数字和下划线，且必须以字母开头'},
                 next_prompt='\n',
             )
-        if not isinstance(evidence_manifest, list) or not evidence_manifest:
+        if (not isinstance(evidence_manifest, list) or not evidence_manifest
+                or any(not isinstance(e, (str, dict)) or not e
+                       or (isinstance(e, str) and not e.strip())
+                       for e in evidence_manifest)):
             return StepOutcome(
                 {'status': 'error', 'msg': 'evidence_manifest 必须提供至少一条可追溯证据'},
                 next_prompt='\n',
@@ -3185,7 +3005,7 @@ class GenericAgentHandler(BaseHandler):
 
         frontmatter = f"""---
 name: {skill_name}
-description: "{description.replace('"', "'")}"
+description: {json.dumps(description, ensure_ascii=False)}
 tags:
   - auto_generated
   - agent_sop
@@ -3203,7 +3023,19 @@ tags:
                     f.write(f"- {str(evidence).strip()}\n")
                 f.write("\n")
                 f.write(sop_content)
-            os.replace(tmp_path, md_path)
+            with skill_registry.LOCK:
+                if os.path.exists(md_path) and not args.get('overwrite'):
+                    raise ValueError(f'Skill already exists: {skill_name}')
+                previous = Path(md_path).read_bytes() if os.path.exists(md_path) else None
+                os.replace(tmp_path, md_path)
+                try:
+                    skill_registry.register_resource(self.project_root, skill_name, md_path)
+                except Exception:
+                    if previous is None:
+                        os.unlink(md_path)
+                    else:
+                        Path(md_path).write_bytes(previous)
+                    raise
                 
             yield f"成功创建技能SOP：{skill_name}\n"
             return StepOutcome(
@@ -3253,17 +3085,7 @@ tags:
 
 def get_global_memory():
     prompt = "\n"
-    try:
-        suffix = '_en' if os.environ.get('GA_LANG', '') == 'en' else ''
-        with open(os.path.join(script_dir, 'memory/global_mem_insight.txt'), 'r', encoding='utf-8', errors='replace') as f: insight = f.read()
-        with open(os.path.join(script_dir, f'assets/insight_fixed_structure{suffix}.txt'), 'r', encoding='utf-8') as f: structure = f.read()
-        prompt += f'cwd = {os.path.join(script_dir, "temp")} (./)\n'
-        prompt += f"\n[Memory] (../memory)\n"
-        prompt += structure + '\n../memory/global_mem_insight.txt:\n'
-        prompt += insight + "\n"
-    except FileNotFoundError: pass
-    # 读回用户偏好（do_update_user_preference 写入 memory/user_profile.json）。
-    # 之前只写不读导致"记住偏好"断链，这里在每次拼装记忆时注入，让 agent 冷启动即知用户偏好。
+    prompt += f'workspace = {os.path.join(script_dir, "temp")} (./)\n'
     try:
         profile_path = os.path.join(script_dir, 'memory/user_profile.json')
         if os.path.exists(profile_path):

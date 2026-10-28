@@ -25,5 +25,5 @@ tags:
 
 1. **JSON 协议字段不要乱删**：`review_solo.md` / `review_with_refs.md` 末尾的 JSON 结构是和
    [`../xhs_review/SKILL.md`](../../hard_skills/xhs_review/SKILL.md) 主闭环约定好的，删字段会导致下游解析失败。
-2. **毒舌调性**：和 [`../xhs_roast_style/SKILL.md`](../xhs_roast_style/SKILL.md) 保持一致（不带 emoji、不软化）。
+2. **点评调性**：`roast` 直接、具体、基于画面差距，不用空泛甲方话术，不带 emoji；PASS 时留空。
 3. 改完直接生效，无需重启 import（image.py 每次调用都重新读文件）。

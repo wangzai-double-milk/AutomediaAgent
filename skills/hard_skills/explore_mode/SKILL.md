@@ -13,7 +13,7 @@ tags: [capability, browser, exploration]
 2. 为当前动作形成一个最小假设。
 3. 用 `web_visual_click` / `web_visual_fill` 执行一个可逆步骤。
 4. 检查 `verified` 或重新扫描，确认页面是否按预期变化。
-5. 成功路径写入 `memory/world_model/<platform>.md`；失败则修正假设。
+5. 记录本任务证据；高频且稳定的流程再通过 `create_skill` 沉淀。
 6. 连续三次失败后停止盲试并请求必要的人类介入。
 
 ## 边界

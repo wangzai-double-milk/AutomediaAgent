@@ -1,11 +1,8 @@
 # reflect/autonomous.py
-import time
-import random
-
 import os
 
 # 为了防反爬并模拟真实人类，设置每 30 分钟（1800秒）触发一次后台学习
-INTERVAL = int(os.environ.get('INTERVAL', '3'))
+INTERVAL = int(os.environ.get('INTERVAL', '1800'))
 ONCE = False  # 关闭单次测试模式，允许持续循环运行
 
 def check():
@@ -30,7 +27,7 @@ def check():
    - 如果没学到新技能，请继续滑动信息流或查看下一篇笔记，**绝对不要进行实战演练**。
 4. 记录习惯：如果发现了适合当前账号的运营偏好，调用 `update_user_preference` 记录下来。
 5. 【重点：学以致用的实战演练】：当你**成功覆盖更新了现有软技能文件后**，你必须立刻进行实战：
-   - 先调用生图工具 `generate_image` 生成一张美食原图（注意：生图 prompt 必须写英文）。
+   - 先调用生图工具 `xhs_image_generate` 生成一张美食原图（注意：生图 prompt 必须写英文）。
    - 然后**调用 P 图工具 `xhs_image_edit`**，用你刚学到的修图技巧对这张生成的图片进行处理。
    - 处理完成后，为这张美食图片配上正常的美食分享标题、文案和标签（严禁把 P 图技巧写进文案里）。
    - 最后调用 `xhs_publish_note` 帮我发布一篇“仅自己可见（private）”的真实笔记。"""

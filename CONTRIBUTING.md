@@ -1,44 +1,31 @@
-# Contributing to GenericAgent
+# Contributing to AutoMedia
 
-## Why This File Is Short
+Keep changes small, evidence-based, and consistent with the existing execution boundaries.
 
-GenericAgent's core is ~3K lines. Every file in this repo will be read by AI agents — potentially thousands of times. Extra words cost real tokens and push useful context out of the window, increasing hallucinations. This document practices what it preaches: **say only what matters.**
+Useful contributions include a minimal reproduction of a platform page change,
+a media-analysis example, or a reusable Skill with observable evidence.
+See the [capability matrix](docs/CAPABILITY_MATRIX.md) before claiming new support.
 
-## Before You Contribute
+## Rules
 
-1. **Read the codebase first.** It's small enough to read in one sitting. Understand the philosophy before proposing changes.
-2. **Open an Issue first** for anything non-trivial. Discuss before coding.
+1. `skills/registry.json` is the source of truth for skill paths, dependencies, and tool gates.
+2. A Skill describes decisions and constraints; a Tool performs one bounded action.
+3. Do not duplicate selectors, request payloads, or retry timings in Skills. Those belong in code.
+4. New dynamic tools require both `tools/<name>/tool.json` and
+   `tools/<name>/execute.py`; the schema name must match the directory and
+   `execute` must be synchronous.
+   Prefixes `web_` and `xhs_` are reserved for built-in guarded tools.
+5. Never commit credentials, runtime tasks, logs, browser profiles, or `skills/local/`.
+6. Account side effects need explicit intent and observable verification.
 
-## Code Standards
+## Before a Pull Request
 
-All PRs go through a strict automated code review skill. Key expectations:
+```bash
+python -m pytest -q
+python scripts/check_skill_graph.py
+python -m build
+```
 
-- **Self-documenting code, minimal comments.** If code needs a paragraph to explain, rewrite it.
-- **Compact and visually uniform.** Fewer lines, consistent line lengths, no fluff.
-- **Small change radius.** Changing A shouldn't ripple through B, C, D.
-- **More features → less code.** Good abstractions make the codebase shrink, not grow.
-- **Let it crash by failure radius.** Critical errors fail loud; trivial ones pass silently. No blanket try-catch.
-
-> ⚠️ This review is deliberately strict — most AI-generated code (e.g. Claude Code output) will not pass as-is. Read the full principles before submitting.
-
-## Skill Contributions
-
-GenericAgent evolves through skills. Not all skills belong in the core repo:
-
-| Type | Where it goes | Example |
-|---|---|---|
-| **Fundamental / universal** | Core repo (`memory/`) | File search, clipboard, basic web ops |
-| **Domain-specific / niche** | Skill Marketplace *(coming soon)* | Stock screening, food delivery, specific API integrations |
-
-If your skill only makes sense for a specific workflow, it's a marketplace candidate, not a core PR.
-
-## PR Checklist
-
-- [ ] Issue linked or context explained in ≤3 sentences
-- [ ] Code passes the [review principles] self-check:
-  1. Can I safely modify this locally without reading the whole codebase?
-  2. Is there a clear core abstraction — new features add implementations, not modify old logic?
-  3. Are change points converging at boundaries, not scattered everywhere?
-  4. On failure, can I quickly locate the responsible module?
-- [ ] Net line count: ideally negative or zero for refactors
-- [ ] No unnecessary dependencies added
+Include the behavior change, evidence used, and remaining risk in the PR description.
+UI changes should include desktop and narrow-screen screenshots with sample data.
+Offline fixtures do not establish successful real-account publishing.

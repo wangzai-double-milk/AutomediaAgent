@@ -13,8 +13,8 @@ Router -> Workflow -> Capability -> Resource
 - `capability`: performs one bounded operation; it never invokes a workflow.
 - `resource`: prompts, style guides, and domain playbooks; it is never routed directly.
 
-`registry.json` is the executable source of truth. Markdown links are documentation,
-not runtime dependencies.
+`registry.json` is the executable source of truth for dependencies and
+`tool_skill_gates`. Markdown links are documentation, not runtime dependencies.
 
 ## Runtime Rules
 
@@ -26,6 +26,8 @@ not runtime dependencies.
 5. Cross-cutting safety rules are enforced in code gates, not copied into every skill.
 6. Content playbooks generated from research are resources. They belong in
    `soft_skills/` and must not contain tool-routing instructions.
+7. Dynamic tools cannot use the reserved `web_` or `xhs_` prefixes. Platform
+   tools using those prefixes are built in and protected by `tool_skill_gates`.
 
 ## Ownership
 
@@ -33,12 +35,12 @@ not runtime dependencies.
 |---|---|
 | Intent and platform selection | `agent_core` |
 | Research outcome | `research_mode` |
-| Long-running account operation | `operate_mode` |
+| Content planning and account operation | `operate_mode` |
 | One-shot review-to-publish flow | `xhs_review` |
 | Browser perception and action | `perception_action` |
 | Unknown-platform exploration | `explore_mode` |
 | Xiaohongshu search/read | `xhs_search` |
 | Xiaohongshu interactions | `xhs_interact` |
-| Image generation/editing | `xhs_edit` |
+| Image review/generation/editing | `xhs_edit` |
 | Self-visible publishing | `xhs_publish` |
 | Prompt/style/domain knowledge | resource skills |

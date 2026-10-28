@@ -1,10 +1,9 @@
-# AI install hint: choose deps by OS/env + needed ui/bot. do NOT install all.
-# minimal core first; missing packages can be installed on demand.
+# Install the core first; add media dependencies only when video workflows need them.
 
 [project]
-name = "genericagent"
-version = "0.1.0"
-description = "Minimalist self-evolving autonomous agent framework"
+name = "automedia-agent"
+version = "0.2.0"
+description = "Local AI operations workspace for social content research, production, and controlled publishing"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = "MIT"
@@ -16,36 +15,22 @@ dependencies = [
     "bottle>=0.12",
     "simple-websocket-server>=0.4",
     "aiohttp>=3.9",
-    "moviepy>=1.0.3",
     "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
-# select extras, not all. match current task/env.
-# examples: .[ui] for GUI, bot deps only if bot needed.
-ui = [
-    "streamlit>=1.28",
-    "pywebview>=4.0",
-    "textual>=0.70",
-    # tui_v3 (scrollback-first TUI) — prompt_toolkit replaces textual; rich is
-    # now a direct dependency (was transitive via textual in tui_v2).
-    "prompt_toolkit>=3.0,<4",
-    "rich>=13.0",
-    "pillow>=9.0",
-    "PySide6>=6.5",
-]
 dev = [
     "build>=1.2",
     "pytest>=8.0",
 ]
-all-frontends = [
-    "python-telegram-bot>=20.0",
-    "qq-botpy>=1.0",
-    "pycryptodome>=3.19",
-    "qrcode>=7.4",
-    "lark-oapi>=1.0",
-    "wecom-aibot-sdk>=1.0",
-    "dingtalk-stream>=0.20",
+media = [
+    "moviepy>=1.0.3",
+    "imageio-ffmpeg>=0.5",
+]
+desktop = [
+    "Pillow>=10",
+    "pyobjc-framework-Cocoa>=10; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=10; sys_platform == 'darwin'",
 ]
 
 [build-system]
@@ -58,6 +43,7 @@ py-modules = [
     "agentmain",
     "ga",
     "llmcore",
+    "mykey",
     "simphtml",
     "TMWebDriver",
 ]
@@ -68,35 +54,22 @@ where = ["."]
 include = [
     "ga_cli*",
     "tools*",
-    "plugins*",
     "assets*",
     "skills*",
     "frontends*",
     "reflect*",
+    "docs",
 ]
 exclude = ["skills.local*"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"tools" = ["*/tool.json"]
+"skills" = ["registry.json", "ARCHITECTURE.md"]
 "assets" = ["*.json", "*.txt"]
-"assets.demo" = ["*.png"]
-"assets.images" = ["*.jpg", "*.png"]
 "assets.tmwd_cdp_bridge" = ["*.json", "*.js", "*.html"]
-"frontends" = ["*.md", "*.html", "*.png"]
-"frontends.desktop" = ["*.json"]
 "frontends.desktop.static" = ["*.html", "*.css", "*.js"]
 "frontends.desktop.static.vendor" = ["*.js"]
-"frontends.desktop.src-tauri" = ["*.json"]
-"frontends.desktop.src-tauri.capabilities" = ["*.json"]
-"frontends.desktop.src-tauri.icons" = ["*.png"]
-"frontends.skins.boy" = ["*.json", "*.png"]
-"frontends.skins.dinosaur" = ["*.json", "*.png"]
-"frontends.skins.doux" = ["*.json", "*.png"]
-"frontends.skins.glube" = ["*.json", "*.png"]
-"frontends.skins.line" = ["*.json", "*.png", "*.txt"]
-"frontends.skins.mort" = ["*.json", "*.png"]
-"frontends.skins.tard" = ["*.json", "*.png"]
-"frontends.skins.vita" = ["*.json", "*.png"]
 "skills.hard_skills.agent_core" = ["*.md"]
 "skills.hard_skills.explore_mode" = ["*.md"]
 "skills.hard_skills.operate_mode" = ["*.md"]
@@ -104,13 +77,30 @@ namespaces = true
 "skills.hard_skills.research_mode" = ["*.md"]
 "skills.hard_skills.xhs_interact" = ["*.md"]
 "skills.hard_skills.xhs_publish" = ["*.md"]
+"skills.hard_skills.xhs_manage" = ["*.md"]
 "skills.hard_skills.xhs_review" = ["*.md"]
 "skills.hard_skills.xhs_search" = ["*.md"]
 "skills.soft_skills.git_content_creation" = ["*.md"]
+"skills.soft_skills.commercial_ad_production" = ["*.md"]
 "skills.soft_skills.search_anywhere" = ["*.md"]
 "skills.soft_skills.xhs_edit" = ["*.md"]
 "skills.soft_skills.xhs_review_prompt" = ["*.md"]
-"skills.soft_skills.xhs_roast_style" = ["*.md"]
+"skills.soft_skills.personal_operating_method" = ["*.md"]
+"docs" = [
+    "installation_zh.md",
+    "CAPABILITY_MATRIX.md",
+    "NEW_ACCOUNT_TEST_CONTROL.md",
+    "EXECUTION_PRESENTATION.md",
+    "DOCUMENTATION_MAP.md",
+    "OPEN_SOURCE_DISCOVERABILITY.md",
+    "PROJECT_SOURCES.md",
+    "RELEASE_VALIDATION.md",
+    "FRONTEND_STUDIO_DESKTOP.png",
+    "FRONTEND_STUDIO_IDEAS.png",
+    "EXECUTION_FEED_DESKTOP.png",
+    "EXECUTION_FEED_DETAIL.png",
+    "SOCIAL_PREVIEW.png",
+]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["__pycache__/*", "*.pyc", "*.pyo"]
@@ -118,3 +108,7 @@ namespaces = true
 
 [project.scripts]
 ga = "ga_cli.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

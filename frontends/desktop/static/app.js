@@ -1,10 +1,11 @@
-window.process = window.process || { platform: navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'win32' };
-// GenericAgent Desktop — Renderer Logic
+window.process = window.process || { platform: /Macintosh|Mac OS X/.test(navigator.userAgent) ? 'darwin' : 'win32' };
+// AutoMedia Studio renderer.
 // Handles UI state, sessions, streaming, slash commands.
 
 'use strict';
 
 // ─── State ────────────────────────────────────────────────────────────────
+const pendingImages = []; // Uploaded media descriptors kept for legacy naming.
 const state = {
   sessions: new Map(),      // localSessionId -> { id, bridgeSessionId, title, messages: [], cwd, config, diagnostics }
   activeId: null,
@@ -54,6 +55,8 @@ const focusCaptionEl = $('focus-caption');
 let selectedWorkspaceItemId = null;
 let currentWorkspace = null;
 let browserWallLayout = 'auto';
+let workspaceRenderKey = null;
+let focusRenderKey = null;
 
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────
@@ -297,12 +300,25 @@ function workspaceItems(workspace) {
       roleLabel: item.kind === 'report' ? '任务报告' : '中间文档',
       title: item.name,
     })),
+    ...(workspace?.draft ? [{
+      id: 'publish-draft', kind: 'document', role: 'draft', roleLabel: '发布文案',
+      title: workspace.draft.title || '小红书发布文案', name: '发布文案',
+      preview: [workspace.draft.desc, ...(workspace.draft.tags || [])].filter(Boolean).join('\n\n'),
+    }] : []),
   ];
 }
 
 function setWorkspaceFocus(item) {
   if (!focusStageEl || !item) return;
   selectedWorkspaceItemId = item.id;
+  const nextKey = JSON.stringify([state.activeId, item]);
+  if (focusRenderKey === nextKey) {
+    document.querySelectorAll('.asset-item, .document-item').forEach((element) => {
+      element.classList.toggle('selected', element.dataset.itemId === item.id);
+    });
+    return;
+  }
+  focusRenderKey = nextKey;
   focusStageEl.innerHTML = '';
   focusStageEl.className = `focus-stage ${item.kind || 'document'} ${item.role || ''}`;
   focusTitleEl.textContent = item.title || item.name || '当前工作对象';
@@ -346,6 +362,7 @@ function setWorkspaceFocus(item) {
   document.querySelectorAll('.asset-item').forEach((element) => {
     element.classList.toggle('selected', element.dataset.itemId === item.id);
   });
+  window.dispatchEvent(new CustomEvent('automedia:focus', { detail: item }));
 }
 
 function createMediaCard(item) {
@@ -402,6 +419,7 @@ function renderDocumentGallery(workspace) {
     const draftButton = document.createElement('button');
     draftButton.type = 'button';
     draftButton.className = 'document-item draft-document';
+    draftButton.dataset.itemId = 'publish-draft';
     draftButton.innerHTML = '<i>文</i>';
     const copy = document.createElement('div');
     const title = document.createElement('strong');
@@ -480,13 +498,21 @@ function renderDraft(draft) {
   panel.classList.toggle('hidden', !draft);
   if (!draft) return;
   panel.className = `draft-preview ${draft.status || 'preparing'}`;
-  panel.querySelector('.draft-status span').textContent = draft.status === 'published'
-    ? '已经发布'
-    : draft.status === 'error' ? '发布需要处理' : '发布准备中';
+  const statusLabels = {
+    published: draft.scheduleAt ? '已提交定时发布' : '已经发布',
+    prepared: '预填完成，尚未发布',
+    draft: '已保存浏览器草稿',
+    uncertain: '提交结果等待核对',
+    error: '发布需要处理',
+    preparing: '发布准备中',
+  };
+  panel.querySelector('.draft-status span').textContent = statusLabels[draft.status] || '发布准备中';
   $('draft-title').textContent = draft.title || '标题还在生成';
   $('draft-desc').textContent = draft.desc || `正文已准备 ${draft.descLength || 0} 字`;
   $('draft-visibility').textContent = draft.visibility || '等待确认可见范围';
-  $('draft-image-count').textContent = `${(draft.images || []).length} 张图`;
+  $('draft-image-count').textContent = draft.kind === 'podcast' ? '音频与封面'
+    : draft.kind === 'longform' ? '长文排版图片'
+    : draft.kind === 'video' ? '1 个视频' : `${(draft.images || []).length} 张图`;
   $('draft-tags').replaceChildren(...(draft.tags || []).map((value) => {
     const tag = document.createElement('span');
     tag.textContent = value;
@@ -496,6 +522,9 @@ function renderDraft(draft) {
 
 function renderWorkspace(workspace) {
   currentWorkspace = workspace || null;
+  const nextKey = JSON.stringify([state.activeId, workspace]);
+  if (workspaceRenderKey === nextKey) return;
+  workspaceRenderKey = nextKey;
   renderPipeline(workspace);
   const references = workspace?.references || [];
   const assets = workspace?.assets || [];
@@ -514,12 +543,14 @@ function renderWorkspace(workspace) {
     setWorkspaceFocus(focus);
   } else {
     selectedWorkspaceItemId = null;
+    focusRenderKey = null;
     focusStageEl.className = 'focus-stage empty';
     focusStageEl.innerHTML = '<div class="focus-placeholder"><div class="focus-shapes"><i></i><i></i><i></i></div><strong>中间过程会出现在这里</strong><span>参考帖子、原始素材、改图版本和待发布内容都会自动汇集</span></div>';
     focusTitleEl.textContent = '当前工作对象';
     focusRoleEl.textContent = 'CURRENT OBJECT';
     $('focus-open').classList.add('hidden');
   }
+  window.dispatchEvent(new CustomEvent('automedia:workspace', { detail: workspace }));
 }
 
 function renderKnowledge(items) {
@@ -605,6 +636,7 @@ function renderActivity(data) {
   renderKnowledge(data?.knowledge || []);
   renderWorkspace(data?.workspace || null);
   renderMetrics(data?.metrics || {});
+  window.dispatchEvent(new CustomEvent('automedia:activity', { detail: data }));
 }
 
 async function pollActivity() {
@@ -630,13 +662,39 @@ let platformPollBusy = false;
 
 function renderPlatformStatus(data) {
   state.platformStatus = data || null;
+  window.dispatchEvent(new CustomEvent('automedia:platform', { detail: data }));
   const platforms = data?.platforms || {};
   for (const id of ['xiaohongshu', 'douyin']) {
-    const item = platforms[id] || {
+    let item = platforms[id] || {
       state: 'open_required',
       label: '还没打开',
       detail: '请先打开平台并完成登录',
     };
+    if (id === 'xiaohongshu' && item.state !== 'restricted'
+        && !data?.testControl?.enabled
+        && !data?.browserConnected && data?.desktop?.available) {
+      const desktop = data.desktop;
+      item = {
+        ...item,
+        state: desktop.loggedIn ? 'ready' : 'check_required',
+        label: desktop.loggedIn ? '已就绪' : '桌面操作可用',
+        detail: desktop.loggedIn
+          ? `${desktop.account || '当前账号'}已登录，可以执行小红书任务`
+          : '已发现现有 Chrome 小红书页面；任务开始时会核对登录账号',
+      };
+    }
+    if (id === 'xiaohongshu' && data?.testControl?.enabled) {
+      const test = data.testControl;
+      const binding = test.binding;
+      const available = test.write_ready || {};
+      if (item.state !== 'restricted') {
+        const after = available.retry_after ? new Date(available.retry_after).toLocaleString() : '';
+        item = { ...item, state: available.ok ? 'ready' : 'check_required',
+          label: !binding ? '等待测试账号' : available.ok ? '测试账号已绑定' : '测试冷却中',
+          detail: `${binding?.nickname || '请登录并核对新测试账号'}${after ? `；下次可提交 ${after}` : ''}；后台发布已暂停`,
+        };
+      }
+    }
     const card = document.querySelector(`[data-platform-card="${id}"]`);
     if (card) {
       card.className = `platform-check ${id === 'xiaohongshu' ? 'xhs' : 'douyin'} ${item.state}`;
@@ -660,8 +718,8 @@ function renderPlatformStatus(data) {
   const hint = $('setup-hint');
   if (hint) {
     hint.textContent = data?.overallReady
-      ? '两个平台都准备好了，现在可以放心把任务交给 Agent。'
-      : '建议两个平台都显示“已就绪”后再开始跨平台任务。';
+      ? '平台已就绪，可以开始任务。'
+      : '小红书任务只需准备小红书；任务开始时会核对账号。';
   }
   const continueBtn = $('setup-continue');
   if (continueBtn) continueBtn.textContent = data?.overallReady ? '都准备好了，开始使用' : '暂时跳过，先看看';
@@ -688,6 +746,8 @@ function openSetupGate() {
 function closeSetupGate() {
   $('setup-gate')?.classList.add('hidden');
   try { sessionStorage.setItem('automedia-setup-dismissed', '1'); } catch (_) {}
+  // Restore focus outside the now-hidden dialog for keyboard/screen readers.
+  $('input')?.focus();
 }
 
 async function openPlatform(platform) {
@@ -773,7 +833,7 @@ function detectStructuredKind(line) {
   const m = trimmed.match(/^(TOOL_RECALL|TOOL_REQUEST|TOOL_RESPONSE|COWORK|TUNR|TURN|ACTION|OBSERVATION|THOUGHT|TOOL)[\s:_-]*(.*)$/i);
   if (m) return { kind: m[1].toUpperCase(), rest: (m[2] || '').trim() };
 
-  // GenericAgent's ACP bridge currently streams tool calls/results as plain
+  // The bridge currently streams tool calls/results as plain
   // assistant text, not as ACP `tool_call` notifications. Recognize the real
   // XML-ish markers so streamed code_run/file_read/etc. blocks are folded.
   if (/^<function_calls\b[^>]*>/i.test(trimmed) || /^<invoke\b[^>]*\bname=["'][^"']+["'][^>]*>/i.test(trimmed)) {
@@ -1045,7 +1105,7 @@ function turnHeaderLabel(index, label) {
   return `Turn ${index} : ${label || 'response'}`;
 }
 
-function groupIntoTurns(segments, options = {}) {
+function groupIntoTurns(segments) {
   let foldIndex = 0;
   return (segments || []).map((seg) => {
     if (!shouldFoldSegment(seg.kind, seg.text)) return { type: 'plain', segment: seg };
@@ -1175,6 +1235,12 @@ function extractAndRenderSummary(container, text) {
 }
 
 function renderStructuredMarkdownInto(container, text, options = {}) {
+  if (window.AutoMediaExecution?.render(container, text, {
+    key: `${state.activeId || 'none'}:${options.messageId || options.taskStartedAt || 'live'}`,
+    live: !!options.live,
+    status: options.status,
+    markdown: renderMarkdown,
+  })) return;
   const segments = splitStructuredSegments(text);
   container.innerHTML = '';
   if (segments.length === 1 && !shouldFoldSegment(segments[0].kind, segments[0].text)) {
@@ -1182,7 +1248,7 @@ function renderStructuredMarkdownInto(container, text, options = {}) {
     if (remaining) container.insertAdjacentHTML('beforeend', renderMarkdown(remaining));
     return;
   }
-  for (const item of groupIntoTurns(segments, options)) {
+  for (const item of groupIntoTurns(segments)) {
     if (item.type === 'plain') {
       const plain = document.createElement('div');
       plain.className = 'md';
@@ -1457,9 +1523,9 @@ function renderMessages() {
     messagesEl.classList.add('empty');
     messagesEl.innerHTML = `
       <div class="empty-state">
-        <div class="empty-kicker">今天想让它研究什么？</div>
-        <div class="empty-title">给个目标，剩下的交给它</div>
-        <div class="empty-sub">它会自己搜索、刷内容、看素材，并把新发现讲给你听。</div>
+        <div class="empty-kicker">导演，请说</div>
+        <div class="empty-title">今天，开拍什么？</div>
+        <div class="empty-sub">给个目标，看它搜索、拆解，再把想法变成作品。</div>
         <div class="starter-grid">
           <button class="starter-card" data-prompt="调研小红书和抖音最近的内容趋势，持续看到没有新知识为止"><span class="starter-icon">↗</span><strong>找近期趋势</strong><small>看看大家最近都在聊什么</small></button>
           <button class="starter-card" data-prompt="分析我所在赛道的爆款内容，整理可复用的拍摄和文案方法"><span class="starter-icon">✦</span><strong>拆解爆款</strong><small>学会高互动内容怎么做</small></button>
@@ -1565,9 +1631,10 @@ function renderMessage(msg, append = true) {
       body.className = 'assistant-response md';
       ensureAssistantTaskElapsed(wrap, msg.taskStartedAt, msg.taskEndedAt);
       const cleanContent = (msg.content || '').replace(/\n*`{5}\n*\[Info\] Final response to user\.\n*`{5}\s*$/, '');
-      renderStructuredMarkdownInto(body, cleanContent);
+      renderStructuredMarkdownInto(body, cleanContent, { messageId: msg.id, taskStartedAt: msg.taskStartedAt });
       injectCopyButtons(body);
       wrap.appendChild(body);
+      wrap.classList.toggle('execution-message', !!body._executionFeed);
     }
     injectCopyButtons(wrap);
     messagesEl.appendChild(wrap);
@@ -1744,10 +1811,11 @@ function renderAssistantDraft(sess, draft) {
     wrap.dataset.buf = draft.text;
     const body = document.createElement('div');
     body.className = 'assistant-response md';
-    renderStructuredMarkdownInto(body, draft.text);
+    renderStructuredMarkdownInto(body, draft.text, { live: true, messageId: draft.bridgeMessageId, taskStartedAt: draft.taskStartedAt });
     injectCopyButtons(body);
-    if (!draft.finalized) body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
+    if (!draft.finalized && !body._executionFeed) body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
     wrap.appendChild(body);
+    wrap.classList.toggle('execution-message', !!body._executionFeed);
   }
   for (const seg of draft.segments || []) {
     wrap.appendChild(buildTurn(seg.kind, seg.text, seg.collapsed, nextTurnIndexForWrap(wrap)));
@@ -1777,9 +1845,9 @@ function renderAssistantDraftInPlace(sess, draft) {
     if (firstTurn) wrap.insertBefore(body, firstTurn);
     else wrap.appendChild(body);
   }
-  renderStructuredMarkdownInto(body, draft.text || '');
+  renderStructuredMarkdownInto(body, draft.text || '', { live: true, messageId: draft.bridgeMessageId, taskStartedAt: draft.taskStartedAt });
   injectCopyButtons(body);
-  body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
+  if (!body._executionFeed) body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
   if (isNearBottom()) scrollToBottom(false);
   return wrap;
 }
@@ -1802,8 +1870,8 @@ function appendAssistantChunk(sess, text) {
   }
   wrap.dataset.buf = draft.text;
   ensureAssistantTaskElapsed(wrap, draft.taskStartedAt || runtime.taskStartedAt);
-  renderStructuredMarkdownInto(body, draft.text);
-  body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
+  renderStructuredMarkdownInto(body, draft.text, { live: true, messageId: draft.bridgeMessageId, taskStartedAt: draft.taskStartedAt });
+  if (!body._executionFeed) body.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
   if (isNearBottom()) scrollToBottom(false);
 }
 
@@ -2241,8 +2309,9 @@ function renderSendButtonState() {
   const busy = !!getActiveSessionRuntime()?.busy;
   sendBtn.classList.toggle('stop', busy);
   sendBtn.title = busy ? 'Stop (Esc)' : 'Send (Enter)';
+  sendBtn.setAttribute('aria-label', busy ? '停止任务' : '发送任务');
   sendBtn.innerHTML = busy ? STOP_ICON : SEND_ICON;
-  sendBtn.disabled = !hasText && !busy;
+  sendBtn.disabled = !hasText && !busy && pendingImages.length === 0;
 }
 
 function updateSendButton() {
@@ -2507,7 +2576,6 @@ inputEl.addEventListener('keydown', (e) => {
 // ─── Local image/video upload ─────────────────────────────────────────────
 const imagePreviews = document.getElementById('image-previews');
 const mediaInput = $('media-input');
-const pendingImages = []; // Uploaded media descriptors kept for legacy naming.
 
 async function uploadMediaFile(file) {
   if (!file || (!file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
@@ -2588,6 +2656,7 @@ function renderImagePreviews() {
       const idx = pendingImages.findIndex(i => i.id === img.id);
       if (idx !== -1) pendingImages.splice(idx, 1);
       renderImagePreviews();
+      updateSendButton();
     });
 
     wrapper.appendChild(mediaEl);
@@ -2606,6 +2675,10 @@ function clearPendingImages() {
 function submitInput() {
   const text = inputEl.value.trim();
   if (!text && pendingImages.length === 0) return;
+  if (!state.bridgeReady) {
+    showError('工作台尚未连接，输入和素材已保留。请确认服务运行后再发送。');
+    return;
+  }
   if (pendingImages.some(item => item.uploading)) {
     showError('素材仍在上传，请稍等完成后再发送。');
     return;
@@ -2765,6 +2838,7 @@ settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSe
     if (!query) { searchCount.textContent = ''; return; }
 
     const chatArea = document.getElementById('messages');
+    window.AutoMediaExecution?.prepareSearch(chatArea, query);
     const walker = document.createTreeWalker(chatArea, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);
@@ -2802,6 +2876,7 @@ settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSe
       // Expand any collapsed ancestor turns so the match is visible
       let ancestor = highlights[currentIdx].parentElement;
       while (ancestor && ancestor !== document.body) {
+        if (ancestor.tagName === 'DETAILS') ancestor.open = true;
         if (ancestor.classList.contains('turn') && ancestor.classList.contains('collapsed')) {
           ancestor.classList.remove('collapsed');
         }
@@ -2816,6 +2891,7 @@ settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSe
   function prevMatch() { if (!highlights.length) return; currentIdx = (currentIdx - 1 + highlights.length) % highlights.length; scrollToHighlight(); }
 
   // Event listeners
+  $('chat-search')?.addEventListener('click', openSearch);
   searchClose.addEventListener('click', closeSearch);
   searchPrev.addEventListener('click', prevMatch);
   searchNext.addEventListener('click', nextMatch);
@@ -2834,7 +2910,7 @@ settingsModal.querySelector('.modal-backdrop').addEventListener('click', closeSe
   // Note: On macOS Electron intercepts Cmd+F via menu accelerator,
   // so we also listen for IPC 'open-search' from main process.
   document.addEventListener('keydown', (e) => {
-    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isMac = /Macintosh|Mac OS X/.test(navigator.userAgent);
     const mod = isMac ? e.metaKey : e.ctrlKey;
     if (mod && e.key === 'f') {
       e.preventDefault();

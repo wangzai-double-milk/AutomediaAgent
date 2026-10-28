@@ -1,4 +1,4 @@
-import os, json, re, time, requests, sys, threading, urllib3, base64, importlib, uuid
+import os, json, re, time, requests, sys, threading, urllib3, importlib, uuid
 from datetime import datetime
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _RESP_CACHE_KEY = str(uuid.uuid4())
@@ -15,21 +15,48 @@ def _load_mykeys():
             raise Exception(f'[ERROR] mykey.py found but failed to import: {e}') from e
     except SyntaxError as e:
         raise Exception(f'[ERROR] mykey.py has syntax error: {e}') from e
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mykey.json')
-    if not os.path.exists(p): raise Exception('[ERROR] mykey.py not found in sys.path and mykey.json not found. Run "python configure_mykey.py" or copy mykey_template.py to mykey.py and fill in your keys.')
-    with open(_mykey_path := p, encoding='utf-8') as f: return json.load(f)
+    raise Exception(
+        '[ERROR] mykey.py is missing. Restore the tracked adapter and configure '
+        'config.json, AUTOMEDIA_CONFIG, or VOLC_* environment variables.'
+    )
 
 _mykey_path = _mykey_mtime = None
+_mykey_lock = threading.RLock()
+
+
+def _config_signature():
+    paths = [
+        _mykey_path,
+        os.environ.get('AUTOMEDIA_CONFIG'),
+        os.path.join(os.getcwd(), 'config.json'),
+        os.path.expanduser('~/.config/automedia/config.json'),
+        os.path.join(os.path.dirname(_mykey_path or __file__), 'config.json'),
+    ]
+    signature = []
+    for path in paths:
+        try:
+            stat = os.stat(path) if path else None
+        except OSError:
+            stat = None
+        signature.append((path, (stat.st_mtime_ns, stat.st_size) if stat else None))
+    signature.extend((name, os.environ.get(name)) for name in (
+        'VOLC_API_KEY', 'VOLC_API_BASE', 'VOLC_LLM_MODEL',
+        'VOLC_VLM_MODEL', 'VOLC_EDIT_MODEL', 'VOLC_GEN_MODEL',
+    ))
+    return tuple(signature)
+
+
 def reload_mykeys():
     global _mykey_mtime
-    try:
-        mt = os.stat(_mykey_path).st_mtime_ns if _mykey_path else -1
-        if mt == _mykey_mtime: return globals().get('mykeys', {}), False
-        mk = _load_mykeys(); _mykey_mtime = os.stat(_mykey_path).st_mtime_ns
+    with _mykey_lock:
+        mt = _config_signature()
+        if mt == _mykey_mtime and 'mykeys' in globals():
+            return globals()['mykeys'], False
+        mk = _load_mykeys()
+        _mykey_mtime = _config_signature()
         print(f'[Info] Load mykeys from {_mykey_path}')
         globals().update(mykeys=mk)
         return mk, True
-    except: return globals().get('mykeys', {}), False
 
 def __getattr__(name):  # once guard in PEP 562
     if name == 'mykeys': return reload_mykeys()[0]
@@ -44,6 +71,19 @@ DEFAULT_MAX_OUTPUT_TOKENS = 16384
 HISTORY_COMPRESS_THRESHOLD = 36000
 # 单次 trim 内最多做几段 LLM 压缩，超出的段落回退头尾截断，避免一轮里发起过多 LLM 往返。
 _LLM_COMPRESS_BUDGET = 4
+_TERMINAL_ERROR_PREFIXES = (
+    "!!!Error:",
+    "[Error:",
+    "[!!! 流异常中断",
+    "[!!! Response truncated:",
+)
+
+
+def _is_terminal_stream_error(text):
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return text.rstrip().splitlines()[-1].lstrip().startswith(
+        _TERMINAL_ERROR_PREFIXES)
 
 def _llm_compress_segment(text, sess, target_len):
     """用大模型把超长历史段落压缩到 target_len 左右；任何失败都回退到头尾截断，绝不抛出。
@@ -355,6 +395,8 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
     content_block: {type:'text', text:str} | {type:'tool_use', id:str, name:str, input:dict}
     """
     content_text = ""
+    completed = False
+    stream_error = ""
     if api_mode == "responses":
         seen_delta = False; fc_buf = {}; current_fc_idx = None
         for line in resp_lines:
@@ -387,17 +429,32 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
             elif etype == "error":
                 err = evt.get("error", {})
                 emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                if emsg: content_text += f"!!!Error: {emsg}"; yield f"!!!Error: {emsg}"
+                stream_error = emsg or "provider error"
+                break
+            elif etype in ("response.failed", "response.incomplete"):
+                stream_error = etype
                 break
             elif etype == "response.completed":
+                completed = True
                 usage = evt.get("response", {}).get("usage", {})
                 _record_usage(usage, api_mode)
                 break
+        if not completed or stream_error:
+            warning = (
+                ("\n\n" if content_text else "")
+                + f"!!!Error: incomplete SSE response ({stream_error or 'missing response.completed'})"
+            )
+            yield warning
+            return [{"type": "text", "text": warning}]
         blocks = []
         if content_text: blocks.append({"type": "text", "text": content_text})
         for idx in sorted(fc_buf):
             fc = fc_buf[idx]
             inps = _try_parse_tool_args(fc["args"])
+            if not fc["name"] or any(not isinstance(inp, dict) or "_raw" in inp for inp in inps):
+                warning = ("\n\n" if content_text else "") + "!!!Error: invalid tool arguments"
+                yield warning
+                return [{"type": "text", "text": warning}]
             for i, inp in enumerate(inps):
                 bid = fc["id"] or ''
                 if len(inps) > 1: bid = f"{bid}_{i}" if bid else f"split_{i}"
@@ -414,7 +471,15 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
             if data_str == "[DONE]": break
             try: evt = json.loads(data_str)
             except: continue
+            if evt.get("error"):
+                stream_error = "provider error"
+                break
             ch = (evt.get("choices") or [{}])[0]
+            reason = ch.get("finish_reason")
+            if reason:
+                completed = reason in ("stop", "tool_calls", "function_call")
+                if not completed:
+                    stream_error = str(reason)
             delta = ch.get("delta") or {}
             if delta.get("reasoning_content"):
                 reasoning_text += delta["reasoning_content"]
@@ -431,12 +496,23 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
                 if tc.get("id") and not tc_buf[idx]["id"]: tc_buf[idx]["id"] = tc["id"]
             usage = evt.get("usage")
             if usage: _record_usage(usage, api_mode)
+        if not completed or stream_error:
+            warning = (
+                ("\n\n" if content_text else "")
+                + f"!!!Error: incomplete SSE response ({stream_error or 'missing finish_reason'})"
+            )
+            yield warning
+            return [{"type": "text", "text": warning}]
         blocks = []
         if reasoning_text: blocks.append({"type": "thinking", "thinking": reasoning_text})
         if content_text: blocks.append({"type": "text", "text": content_text})
         for idx in sorted(tc_buf):
             tc = tc_buf[idx]
             inps = _try_parse_tool_args(tc["args"])
+            if not tc["name"] or any(not isinstance(inp, dict) or "_raw" in inp for inp in inps):
+                warning = ("\n\n" if content_text else "") + "!!!Error: invalid tool arguments"
+                yield warning
+                return [{"type": "text", "text": warning}]
             for i, inp in enumerate(inps):
                 bid = tc["id"] or ''
                 if len(inps) > 1: bid = f"{bid}_{i}" if bid else f"split_{i}"
@@ -909,9 +985,14 @@ class ToolClient:
         gen = self.backend.ask(full_prompt)
         _write_llm_log('Prompt', full_prompt, self.log_path)
         raw_text = ''
+        last_chunk = None
         for chunk in gen:
-            raw_text += chunk; yield chunk
+            last_chunk = chunk
+            raw_text += chunk
+            yield chunk
         _write_llm_log('Response', raw_text, self.log_path)
+        if _is_terminal_stream_error(last_chunk):
+            return MockResponse("", raw_text, [], raw_text)
         return self._parse_mixed_response(raw_text)
 
     def _prepare_tool_instruction(self, tools):
@@ -1090,7 +1171,6 @@ class MixinSession:
         return self._cur_idx
     def _raw_ask(self, *args, **kwargs):
         base, n = self._pick(), len(self._sessions)
-        test_error = lambda x: isinstance(x, str) and x.lstrip().startswith(('!!!Error:', '[Error:'))
         for attempt in range(self._retries + 1):
             idx = (base + attempt) % n
             gen = self._orig_raw_asks[idx](*args, **kwargs)
@@ -1098,19 +1178,26 @@ class MixinSession:
             last_chunk, return_val, yielded = None, [], False
             try:
                 while True:
-                    chunk = next(gen); last_chunk = chunk
-                    if not yielded and test_error(chunk): continue
-                    yield chunk; yielded = True
+                    chunk = next(gen)
+                    last_chunk = chunk
+                    if not yielded and _is_terminal_stream_error(chunk):
+                        continue
+                    yield chunk
+                    yielded = True
             except StopIteration as e: return_val = e.value or []
-            is_err = test_error(last_chunk)
+            is_err = _is_terminal_stream_error(last_chunk)
             if not is_err:
                 if attempt > 0: self._cur_idx = idx; self._switched_at = time.time()
                 elif isinstance(last_chunk, str) and '[!!! 流异常中断' in last_chunk and n > 1:
                     self._cur_idx = (idx + 1) % n; self._switched_at = time.time()
                     print(f'[MixinSession] Partial failure, next call → s{self._cur_idx} ({self._sessions[self._cur_idx].name})')
                 return return_val
+            if yielded:
+                return return_val
             if attempt >= self._retries:
-                yield last_chunk; return return_val
+                if last_chunk is not None:
+                    yield last_chunk
+                return return_val
             nxt = (base + attempt + 1) % n
             if nxt == base:  # full round failed, delay before next
                 rnd = (attempt + 1) // n

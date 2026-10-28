@@ -1,8 +1,8 @@
 """
-小红书图像四件套（库函数；不直接做工作流编排，编排逻辑见 memory/xhs_sop.md）：
+AutoMedia 媒体原子能力（工作流编排见 skills/registry.json）：
   - review_image(image, hint='', reference_images=None)   严格档审图（支持多图对比）
-  - edit_image(image, edit_prompts, save_path=None)       Seedream 4.5 i2i
-  - generate_image(prompt, size='2K', save_path=None)     Seedream 4.5 t2i
+  - edit_image(image, edit_prompts, save_path=None)       image editing
+  - generate_image(prompt, size='2K', save_path=None)     image generation
   - extract_text_from_image(image)                        VLM OCR / 读图（提攻略文字）
 
 所有函数返回普通 dict（review）或本地路径 str（edit/generate）。
@@ -20,7 +20,6 @@ import mimetypes
 import urllib.request
 import urllib.error
 import urllib.parse
-import subprocess
 import tempfile
 import uuid as uuid_mod
 import requests
@@ -35,7 +34,8 @@ if _PROJECT_ROOT not in sys.path:
 
 try:
     import mykey  # noqa: E402
-except ImportError:
+except (ImportError, FileNotFoundError, ValueError):
+    # Offline imports/tests do not require credentials; API calls validate below.
     mykey = None
 
 # ─────────────────────────────────────────────────────────────────
@@ -65,8 +65,10 @@ def _load_media_config():
         cfg = dict(mykey.native_oai_config)
         return cfg, dict(getattr(mykey, 'volc_models', {}) or {})
 
-    candidates = [
-        os.environ.get('AUTOMEDIA_CONFIG'),
+    explicit = os.environ.get('AUTOMEDIA_CONFIG')
+    if explicit and not os.path.isfile(explicit):
+        raise FileNotFoundError('AUTOMEDIA_CONFIG points to a missing file')
+    candidates = [explicit] if explicit else [
         os.path.join(os.getcwd(), 'config.json'),
         os.path.expanduser('~/.config/automedia/config.json'),
         os.path.join(_PROJECT_ROOT, 'config.json'),
@@ -97,9 +99,7 @@ API_KEY = _CFG.get('apikey') or ''
 
 # 模型名优先从 mykey.volc_models 读取，也兼容 README 约定的 config.json。
 VLM_MODEL = _MODELS.get('vlm', 'doubao-seed-2-0-pro-260215')   # 审图：全模态 VLM (Seed 2.0 Pro)
-# 修图 / 生图 / 多图融合，统一用 Seedream 4.5。
-# Seedream 4.5 原生支持 文生图 / 图生图(i2i) / 多图融合 —— 带 image 参数就是图生图，不带就是文生图。
-# 如果未来需要单独的 SeedEdit 3.0，需要先在方舟控制台手动开通该模型。
+# 修图和生图使用配置文件中对应的模型端点。
 EDIT_MODEL = _MODELS.get('edit', 'doubao-seedream-4-5-251128')  # 改图（i2i）
 GEN_MODEL = _MODELS.get('gen', 'doubao-seedream-4-5-251128')    # 生图（t2i）
 
@@ -167,7 +167,7 @@ def _load_prompt(name: str) -> str:
 # 工具函数
 # ─────────────────────────────────────────────────────────────────
 def _require_api_key():
-    if not API_KEY:
+    if not API_KEY or API_KEY.startswith('ark-在这里'):
         raise RuntimeError(
             '未配置火山引擎 API Key。请设置 VOLC_API_KEY，或在当前目录/config '
             '路径放置 config.json（也可用 AUTOMEDIA_CONFIG 指定）。'
@@ -652,10 +652,10 @@ def review_image(image: str, hint: str = '', reference_images=None) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────
-# ② 改图（Seedream 4.5 i2i）
+# ② 改图
 # ─────────────────────────────────────────────────────────────────
 def edit_image(image: str, edit_prompts, save_path: str = None) -> str:
-    """把多条 edit_prompts 合并喂给 Seedream 4.5（图生图）；返回保存的本地路径。"""
+    """把多条 edit_prompts 合并后调用图像编辑模型；返回保存的本地路径。"""
     if isinstance(edit_prompts, str):
         prompts = [edit_prompts]
     else:
@@ -666,7 +666,7 @@ def edit_image(image: str, edit_prompts, save_path: str = None) -> str:
     if save_path is None:
         save_path = os.path.join(OUTPUT_DIR, f'edited_{int(time.time())}.png')
 
-    # Seedream 4.5 i2i：带 image 参数即触发图生图。
+    # 带 image 参数触发图生图。
     # 注意：4.5 不支持 SeedEdit 专属的 seed / guidance_scale / size='adaptive'，
     #      size 必须用 '1K' / '2K' / '4K' 或具体宽高（如 '2048x2048'）。
     payload = {
@@ -684,7 +684,7 @@ def edit_image(image: str, edit_prompts, save_path: str = None) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────
-# ③ 生图（Seedream 4.5 t2i）
+# ③ 生图
 # ─────────────────────────────────────────────────────────────────
 def generate_image(prompt: str, size: str = '2K', save_path: str = None) -> str:
     """文生图。返回保存的本地路径。"""
@@ -944,7 +944,8 @@ def _prepare_one_video(v: str):
         except Exception as e2:
             log.warning('本地下载/上传视频失败: %s', e2)
         # 只有真实视频 URL 才允许最后降级为 video_url 直传；页面 URL 不再降级，避免 text/html 再次报错。
-        if isinstance(v, str) and _is_direct_video_url(v):
+        if (isinstance(v, str) and v.startswith(('https://', 'http://'))
+                and urllib.parse.urlsplit(v).netloc and _is_direct_video_url(v)):
             log.warning('降级为 video_url 直传真实视频流: %s', v[:120])
             out['video_url'] = v
         else:
@@ -979,6 +980,7 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
         images = [images]
 
     imgs_list = []
+    prep_errors = []
     raw_vids = []
     for media in images:
         if not media or media.startswith('<skip'):
@@ -989,6 +991,7 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
             else:
                 imgs_list.append(image_to_url(media))
         except Exception as e:
+            prep_errors.append(f'媒体准备失败: {e}')
             log.warning('analyze_image skipped a media due to: %s', e)
 
     # 视频：优先用 Files API 上传整段，拿到 file_id 让模型看完整片；
@@ -999,7 +1002,6 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
     vids_list = []
     uploaded_here = []  # 本次调用上传的 file_id，用完即删，释放托管空间（总容量有上限）
     temp_video_files = []  # 本次调用下载的临时视频，用完即删
-    prep_errors = []
     if raw_vids:
         max_workers = max(1, min(_VIDEO_UPLOAD_CONCURRENCY, len(raw_vids)))
         results = [None] * len(raw_vids)
@@ -1027,14 +1029,15 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
             elif r.get('error'):
                 prep_errors.append(r['error'])
 
-    if raw_vids and not vids_list:
+    if not imgs_list and not vids_list:
         for p in temp_video_files:
             try:
                 os.remove(p)
                 log.info('已删除本地临时视频: %s', p)
             except Exception as e:
                 log.warning('删除本地临时视频失败(忽略): %s -> %s', p, e)
-        return '[Error] 视频预处理失败，未拿到可供模型理解的真实视频流。' + (
+        media_kind = '视频' if raw_vids else '图片'
+        return f'[Error] {media_kind}准备失败，未拿到可供模型理解的有效素材。' + (
             '\n' + '\n'.join(prep_errors) if prep_errors else ''
         )
 
@@ -1088,7 +1091,7 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
 
     if prep_errors and not res_text.startswith('[Error]'):
         res_text = (
-            '【⚠️未完成·不可作为全量结论】部分视频未能完成预处理，以下分析仅覆盖成功载入的媒体。\n'
+            '【⚠️未完成·不可作为全量结论】部分媒体未能完成预处理，以下分析仅覆盖成功载入的媒体。\n'
             + '\n'.join(f'- {error}' for error in prep_errors)
             + '\n\n'
             + res_text

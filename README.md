@@ -1,257 +1,167 @@
-# 🌐 全模态社交媒体自动运营 Agent · AutoMedia
-### 首发：小红书 (Xiaohongshu) | 架构可扩展至 抖音 / B站 / 视频号 / 微博 / Twitter / Instagram
+# AutoMedia Agent｜可视化小红书 AI 创作与运营工作台
 
-[![GitHub Repo](https://img.shields.io/badge/GitHub-AutomediaAgent-blue?logo=github)](https://github.com/wangzai-double-milk/AutomediaAgent)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)](https://www.python.org/)
-[![Powered by Doubao](https://img.shields.io/badge/Powered%20by-%E8%B1%86%E5%8C%85%20VLM-FF6B6B)](https://www.volcengine.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit)](https://streamlit.io/)
+**从真实样本到内容成稿，再到受控发布，把你的创作流程放进一个本地“小片场”。**
 
-> **它不仅是一个自动化发帖机器人，更是一个拥有"清晰职业边界感"和"全模态认知"的拟人化数字员工。**
-> 基于豆包全模态大模型（VLM）打造，具备**自主冲浪、爆款拆解、经验沉淀、实战演练**的完整人类学习闭环。
->
-> 🎯 **不止小红书** —— 我们用动静分离的 SkillHub 架构，把"平台交互"与"运营策略"解耦。换一个平台，只需新增一份 `hard_skills/`，**`soft_skills/` 的爆款审美沉淀完全复用**。一个 Agent，孵化全网账号矩阵。
+A local AI workspace for Xiaohongshu research, multimodal content creation, and controlled publishing.
 
-## 💎 一个 Key，省下一整年的 SaaS 订阅费
+[快速开始](#快速开始) · [界面预览](#界面长什么样) · [能力与边界](docs/CAPABILITY_MATRIX.md) · [文档导航](docs/DOCUMENTATION_MAP.md) · [参与贡献](CONTRIBUTING.md)
 
-> **别再为 ChatGPT Plus + Midjourney + Sora + Runway 同时掏钱了。**
-> 🚀 **All-in-One 极简接入** ——只需一把火山引擎 API Key，即刻解锁国产顶级模型全家桶：
-> - 🧠 **Doubao-Seed-2.0-pro**：媲美 GPT-4o 的语言推理 + 原生看图看视频的全模态能力，**一个模型搞定文本+视觉**，输入价低至 **¥0.8 / 百万 tokens**，比 GPT-4o 便宜 **30 倍+**，告别为视觉模型再开一份订阅
-> - 🎨 **Seedream 4.5**：国产 SOTA 文生图，分分钟产出可商用首图，秒杀 MJ 月费 30 美刀
-> - 🎬 **Seedance 2.0**：原生视频生成 + 视频理解，同价位国内独一档
->
-> 💰 **算笔账**：传统方案 GPT-4o + Midjourney + Sora + Pika ≈ **$80~150/月**，本方案跑满一个月 **不到 30 元**。
-> 🪄 **省心程度**：再也不用切 4 个平台、对 4 套 API、维护 4 套 Key —— **一行配置，全模态打通**。
+![AutoMedia Studio：上方工作区与底部对话](docs/FRONTEND_STUDIO_DESKTOP.png)
 
----
+*实际 Studio 界面，使用本地演示数据；截图展示交互，不代表平台任务已完成。*
 
-## ✨ 30 秒看懂它在做什么
+## 给一个目标，留下可复用的成果
 
-```
-🌊 自主冲浪刷信息流  →  👁️ 全模态分析爆款  →  🧠 对比已有经验沉淀新 SOP  →  ⚔️ 实战演练发草稿验收
-        ↑                                                                                  ↓
-        └────────────────────────  循环进化，越用越懂你的赛道（小红书 / 抖音 / B站 ...）  ────────────────────────┘
-```
+| 你想做什么 | 工作台帮你完成什么 | 最终留下什么 |
+|---|---|---|
+| 找选题和内容机会 | 搜索真实笔记，深读正文、评论与可获取的媒体 | 带来源的研究报告、待验证的内容假设 |
+| 做一篇更好的内容 | 提炼标题、脚本与正文；看图、生图、改图；理解真实视频 | 文案、素材版本与修改依据 |
+| 把内容送进小红书 | 准备图文、视频、长文或播客，回读字段，按规则提交 | 发布记录与独立核对结果 |
+| 管理持续创作 | 草稿、作品、合集、定时与任务队列 | 可接续的任务状态、冷却与额度提示 |
+| 让经验越用越值钱 | 把证据支持的方法整理成 Skills | 可复用的工作流与个人创作方法 |
 
-它不是一个"按 Q&A 反应"的机器人，而是一个**会自己找事做、自己学、自己练**的数字运营员工。
+研究需要真实页面与媒体成功载入；报告遇到缺证据会保留缺口。其他网站可以使用通用浏览器探索，**当前平台专用发布能力聚焦小红书**。
 
----
+## 界面长什么样
 
-## 🔥 五大核心黑科技：为什么与众不同？
+上方是可切换的工作区，下方是可展开、可拖动调高的对话。暖纸白、珊瑚橙与薄荷色让操作更轻松，小角色跟随真实任务状态变化。
 
-传统 Agent 往往"学得越多错得越多"，或者只能理解纯文本，导致生成的经验犹如空中楼阁。本项目通过以下核心机制，彻底重构了 Agent 的认知模型：
+| 工作区 | 可以直接操作的内容 |
+|---|---|
+| 调研站 | 查看研究进度、来源与交付物 |
+| 素材台 | 筛选图片、视频和文件，聚焦预览，保持视频连续播放 |
+| 灵感台 | 组合主题与表达方式、灵感抽签、保存导演便笺 |
+| 发布节奏 | 查看账号绑定、冷却、额度与队列状态 |
 
-### 👁️ 1. 打破模态壁垒：全模态联合视觉认知
-彻底告别"凭标题脑补画面"。Agent 在刷帖时，能同时摄取**多张图片、视频关键帧、标题和文案**作为一个整体发送给 VLM，进行深度"图文联合分析"。
-*它能精准拆解出："首图6宫格如何排版"、"文案如何配合首图吸引减脂人群"、"HSL色调参数是多少"，真正像一个新媒体运营一样看懂爆款。*
+![灵感组合与导演便笺](docs/FRONTEND_STUDIO_IDEAS.png)
 
-> 💡 **独家加成**：内置 `moviepy` 智能视频压缩兜底——超过 50MB 的视频会自动降为 720P/15fps 重传分析，**告别"安装 ffmpeg"的烦恼**，开箱即用。
+执行过程也有自己的进展卡：先看当前动作和需关注项，按需展开历史、参数与原始回读；最终报告保留完整正文。
 
-### 🧠 2. 告别记忆爆炸：后置认知去重 & 知识融合
-传统 Agent 的记忆文件会随着运行时间无限膨胀，最终导致大模型上下文混乱。
-本项目的 Agent 在看完爆款帖子后，会**先读取本地已有的 SOP 经验**作为 Baseline，通过大模型的对比能力，自动判断是否有新知识：
-- ✅ **有新知识**：将新闪光点完美融入旧知识，重构排版后覆写更新。
-- 🚮 **无新知识**：直接丢弃，避免冗余。
+![执行进展卡与底部对话](docs/EXECUTION_FEED_DESKTOP.png)
 
-*让技能树永远保持精简、高效，持续自我进化！*
+“工具已返回”与“发布成功”分别表达。页面超时、账号限制、额度不足都会保留实际状态。
 
-### 🛡️ 3. 拒绝代码被篡改：动静分离的"技能树"架构（跨平台复用的关键）
-为解决 Agent 乱改代码的问题，我们设计了一套具有"职业边界感"的 SkillHub 物理隔离架构：
-- 🧱 **`hard_skills/` (静态硬技能)**：底层发帖、点赞、搜索等与网页交互的自动化代码逻辑。**绝对不可篡改**，只有当平台 UI 更新时才进行修复。
-- 🧬 **`soft_skills/` (动态软技能)**：修图参数、排版美学、文案钩子等运营策略。在冲浪时不断吸收爆款经验，**持续自我迭代**。
+## 目前能做到哪一步
 
-*Agent 拥有"边界感"——遇到新领域时只能在 `soft_skills/` 内创建新文件夹，绝不会污染你的核心代码！*
+截至 2026-10-28，macOS 已登录 Chrome 的桌面通路是主要真实验收环境。
 
-> 🌐 **跨平台复用魔法**：想接入抖音 / B站 / Twitter？只需新写一份对应平台的 `hard_skills/`（DOM 选择器和接口），**`soft_skills/` 中沉淀的爆款审美、文案钩子、修图参数完全无需重写**。一份运营经验，全网账号矩阵共享。
+| 能力 | 当前证据 | 使用边界 |
+|---|---|---|
+| 文本、视觉、生图、改图 | 真实模型接口已验证 | 需要自己的模型配置与权限 |
+| 搜索、筛选、详情、评论、主页 | 真实页面已验证 | 返回已加载内容；不承诺全量采集 |
+| 图文 / 视频 / 长文 / 播客 | 四种格式上传、草稿恢复、仅自己可见发布、管理回读与清理有历史实证 | 公开实际发布及完整媒体质量核对仍待验收 |
+| 定时与作品管理 | 定时字段独立回读、修改、可见性调整、删除有实证 | 当前账号权限与页面状态决定可用性 |
+| 点赞、收藏、关注、评论与指定回复 | 自有测试中的单次提交与独立核对已验证 | 受身份绑定和共享额度控制 |
+| 草稿与合集 | 四类草稿；普通合集绑定、播客单合集管理已验证 | 多播客目标、部分普通合集入口未完整验收 |
+| RSS / 私信 / 数据与商业入口 | 表单或读取能力已接入 | RSS最终导入、私信真实发送、商业权限未完整验收 |
+| 抖音等其他网站 | 通用浏览器探索入口 | 没有专用发布闭环；最新双平台趋势研究仍有连接缺口 |
 
-### ⚔️ 4. 纸上得来终觉浅：学以致用的实战演练
-学完新技能（如全新的二次元修图参数）后，Agent 会自动寻找本地旧图，应用刚学到的参数和文案风格，在网页端自动发布一篇"仅自己可见"的真实笔记供你验收。你可以在手机端直观地看到它的学习成果！
+这是可执行的本地工作台。平台结构、登录状态和账号权限会影响结果，完整说明见[能力矩阵](docs/CAPABILITY_MATRIX.md)。
 
-### 🎭 5. 沉浸式互动养号与防风控
-基于 **CDP（Chrome DevTools Protocol）** 底层接管真实浏览器，穿透 Shadow DOM 真实模拟鼠标点击与键盘输入（如物理敲击键盘唤出话题 Tag 下拉框）。通过 `.env` 抽离配置化随机延迟与滑动频率，在冲浪时真实模拟点赞、收藏，彻底告别死板的僵尸号。
-
-### 👁️ 6. 纯视觉感知-动作引擎：让 Agent 真正"睁开眼"操作任意网页 🆕
-这是迈向**通用自主体**的关键一步。过去 Agent 依赖为每个平台写死的选择器和接口，换个网站就抓瞎；现在它能像人一样**直接看屏幕、动鼠标**，理论操作边界 = 一个人盯着浏览器能做的一切。
-
-- 🔍 **Set-of-Marks 视觉选择题**：操作前用轻量 JS 给页面所有可交互元素自动**叠加编号红框**，截图交给豆包 VLM 做"该点几号？"的单选题——彻底规避大模型直接预测像素坐标的"点偏"幻觉，准确率接近 100%。
-- 🧊 **三级结晶缓存，越用越快**：首次靠视觉认路（看图→选号→点击→指纹验证），跑通即把元素 selector 沉淀进本地缓存；下次同样的操作**直接 CDP 点坐标，零 VLM 调用、零 Token、毫秒级响应**。selector 失效则自动退回视觉重学，**自愈**无需人工维护。
-- 🌐 **零 GPU，纯 API 路线**：所有视觉推理走豆包云端 API，本地只跑 1KB 的画框脚本——和工业界顶流 `browser-use` 同路线，但**多了一层"做一遍就记住"的结晶缓存**，长期挂机反而比本地模型方案更快、更省。
-- 🛠️ **三个通用原子能力**：`web_learn_page`（看清页面）/ `web_visual_click`（视觉点击）/ `web_visual_fill`（视觉填写）——给个网址 + 一句话意图，B站、知乎、微博任意网页都能开点。
-
-> 💡 **设计哲学**：专用 `xhs_*` 工具不再是能力来源，而只是"走熟的快路径"。Agent 面对陌生平台先用眼睛探索建模，跑顺了再把高频流程**结晶**成专用工具。小红书只是它学会的第一门"方言"。
-
----
-
-## 🆚 与最前沿纯视觉 Agent 的对比
-
-> 2025-2026 年 Computer Use / GUI Agent 赛道爆发，下面把本项目的视觉引擎和业界最前沿方案做横向对比。结论：**我们选了和工业界顶流 `browser-use` 一致的「纯 DOM + Set-of-Marks + 云端 API」无 GPU 路线，并在其之上独家叠加了「三级结晶缓存」——长期挂机越用越快、越用越省。**
-
-| 维度 | OmniParser v2（微软） | UI-TARS（字节） | browser-use | **本项目 🌟** |
-| --- | --- | --- | --- | --- |
-| 元素识别 | 专训 YOLO 视觉检测模型 | 端到端大模型 | DOM 启发式 + SoM | ✅ **DOM 启发式 + SoM** |
-| 定位方式 | Set-of-Marks 编号 | 直接输出像素坐标 | Set-of-Marks 编号 | ✅ **Set-of-Marks 编号（防点偏）** |
-| 是否要 GPU | ✅ 需本地 GPU | ✅ 需本地 GPU | ❌ 纯 API | ✅ **❌ 纯 API（豆包云端）** |
-| 点偏风险 | 低 | ⚠️ 高（坐标幻觉） | 低 | ✅ **低（做选择题非猜坐标）** |
-| 学习沉淀 | ❌ 每次重算 | ⚠️ 部分支持 | ❌ 每次重算 | ✅ **三级结晶缓存** |
-| 重复操作速度 | 0.5~2s（每次推理） | 0.5~1.5s（每次推理） | 3~5s（每次调 API） | ✅ **0.05~0.1s（命中缓存零调用）** |
-| 改版自愈 | 需重训/重测 | 需重测 | 每次重学 | ✅ **selector 失效自动退回视觉重学** |
-| 接入成本 | 高（部署模型+显卡） | 高（部署模型+显卡） | 低 | ✅ **低（一把豆包 Key）** |
-
-> 💡 **核心差异**：OmniParser / UI-TARS 更准更快但**必须自备 GPU**，违背"开箱即用、能用 API 就用 API"的初衷；`browser-use` 与我们同路线但**每次操作都要重新画框调模型**。我们用「结晶缓存」把首次的视觉认路结果固化成快路径——**第一次 4 秒看图，第 N 次 0.1 秒直点**，长期运行的总耗时与 Token 开销反而低于所有方案。
-
----
-
-## 🎯 适用场景
-
-- 🍜 **美食探店博主**：自动学习同赛道爆款的摆盘构图、滤镜参数、标题钩子
-- 👗 **穿搭达人**：拆解爆款 OOTD 的色调、姿势、文案套路
-- ✈️ **旅行/民宿运营**：定向学习景点笔记的封面排版与情绪文案
-- 🛍️ **种草/带货团队**：批量生成符合赛道审美的笔记草稿，人工二审一键发布
-- 🎓 **MCN 机构**：让一个 Agent 同时孵化 N 个垂直号，每号有独立的 `soft_skills/` 知识库
-
----
-
-## 📂 项目架构
+## 试试这些任务
 
 ```text
-xiaohongshu-agent/
-├── agentmain.py             # Agent 主入口
-├── ga.py                    # 底层执行网关，封装 CDP 操作和工具路由
-├── llmcore.py               # 大模型通信层（对接豆包全家桶）
-├── config.example.json      # 模型/API 配置模板（复制为本地 config.json）
-├── .env.example             # 浏览器操作节奏等运行时配置模板
-├── reflect/
-│   └── autonomous.py        # 核心"大脑" Prompt：定义 Agent 的学习目标和冲浪纪律
-├── skills/                  # 🌟 SkillHub 技能目录
-│   ├── hard_skills/         # 🧱 基础能力（不可篡改，如 xhs_publish 网页交互逻辑）
-│   └── soft_skills/         # 🧬 运营策略（自我进化，如 xhs_edit 修图文案策略）
-├── plugins/                 # 🔌 原子工具插件目录 (支持动态扫描注册)
-│   ├── vlm_analyze.json     # 全模态分析工具 Schema
-│   └── ...
-├── tools/
-│   ├── image.py             # 视觉模型及图像处理底层 API（含 moviepy 视频压缩）
-│   └── xhs_actions.py       # 小红书特定 CDP 交互动作
-├── frontends/
-│   └── stapp.py             # Streamlit 可视化前端
-└── assets/                  # 静态资源及默认 Tools Schema
+搜索小红书近期咖啡探店笔记，每轮深读3–5篇，
+记录正文、已加载评论和媒体证据，输出带来源的选题报告；不互动、不发布。
 ```
 
----
+```text
+分析这张封面，结合我提供的参考图解释差距，
+给出标题方向和改图方案，保留每个版本。
+```
 
-## 🚀 三分钟快速开始
+```text
+用我指定的本地图片与文案准备一篇笔记，先预览，
+回读标题、正文、话题和可见性。
+```
 
-### 1. 环境准备
-确保你已安装 Python 3.10+ 和 Chrome 浏览器。
+平台提交默认仅自己可见；预览只预填，保存草稿是一次写操作。发布前需完成账号绑定与预算检查。
+
+## 快速开始
+
+准备 Python **3.10–3.13**（推荐 3.12）、Git 和 Chrome。纯工作台无需 Node.js 构建；小红书桌面操作主要验收于 macOS。
+
+### 1. 安装
+
 ```bash
-# 1) 创建虚拟环境 (仅首次需要)
-python3 -m venv .venv
-
-# 2) 激活虚拟环境 (每次打开新终端都需要执行)
-# Mac/Linux:
+git clone https://github.com/wangzai-double-milk/AutomediaAgent.git
+cd AutomediaAgent
+python3.12 -m venv .venv
 source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
-
-# 3) 以 editable 模式安装（ga CLI 会从当前项目目录启动前端/脚本）
-pip install -e .
-
-# 如需使用新版终端 TUI / 桌面 GUI 等扩展前端，可安装：
-# pip install -e ".[ui]"
+python -m pip install --upgrade pip
+python -m pip install -e ".[desktop]"
 ```
 
-### 2. 配置模型 Key 与运行参数
+只用文本工作台可安装 `-e .`；大视频代理处理再加 `".[media]"`。Windows 的环境创建与调用方式见[安装说明](docs/installation_zh.md)，Windows/Linux 平台动作尚未完成同等验收。
+
+### 2. 配置模型
+
 ```bash
-cp config.example.json config.json
-cp .env.example .env
+cp -n config.example.json config.json
 ```
-先在 `config.json` 中填入模型配置：
-- `volc_apikey`: 你的火山引擎 API Key（[火山引擎控制台](https://www.volcengine.com/) 一键获取）
-- `volc_apibase` / `models`: 默认已填好，通常不用改
 
-再在 `.env` 中按需修改浏览器操作节奏，灵活调整 Agent 的"手速"以规避风控：
-- `INTERVAL`: 后台学习冲浪的触发频率（秒）
-- `ACTION_DELAY_MIN` / `MAX`: 模拟人类操作的随机停顿范围
+填入自己的火山方舟 Key 与已开通的模型 ID。支持 `AUTOMEDIA_CONFIG` 指定配置文件，以及 `VOLC_API_KEY`、`VOLC_LLM_MODEL`、`VOLC_VLM_MODEL`、`VOLC_GEN_MODEL`、`VOLC_EDIT_MODEL` 等环境变量。`mykey.py` 是配置适配器。
 
-### 3. 登录并开启 CDP
-1. 关闭所有正在运行的 Chrome 实例。
-2. 通过命令行启动一个带有远程调试端口的 Chrome，并登录小红书网页版 (`https://www.xiaohongshu.com`)。
-   - **Mac**: `/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222`
-   - **Windows**: `chrome.exe --remote-debugging-port=9222`
+配置与任务记录留在本机；模型调用会把选定的文本和媒体发送给配置的模型服务。
 
-### 4. 启动 Agent
+### 3. 启动小片场
 
-推荐入口：
-
-| 场景 | 命令 | 说明 |
-|---|---|---|
-| Agent 工作台 | `ga studio` | 对话、行动流、浏览器观察、学习增量与收敛进度 |
-| Streamlit | `streamlit run frontends/stapp.py` | 兼容旧版 Web 界面 |
-| 终端 TUI | `ga tui` | 当前推荐终端入口（`frontends/tui_v3.py`） |
-| 轻量 CLI | `ga cli` | 最少依赖，直接进入命令行对话 |
-| 桌面壳 | `ga launch` | 使用 pywebview 包一层 Web UI |
-
-`ga tui` / `ga launch` 等扩展前端建议先安装 `pip install -e ".[ui]"`。`ga studio` 使用核心依赖即可运行。
-
-#### ✅ 方式 A：可视化界面（推荐）
-启动后会自动打开浏览器。左侧用于对话和下发任务，右侧实时显示 Agent 正在做什么、正在看什么、学到了什么，以及是否达到研究收敛条件。
 ```bash
-ga studio
+python -m ga_cli studio
 ```
 
-#### 🖥️ 方式 B：纯终端后台运行
-如果你不需要界面，只想让它在后台静默打工：
+默认打开 <http://127.0.0.1:14168>。更换端口：
+
 ```bash
-ga cli
+BRIDGE_PORT=14169 python -m ga_cli studio
 ```
 
----
+终端模式使用 `python -m ga_cli cli`。日常命令见[启动速查](HOW_TO_RUN.md)。
 
-## 🛠️ 进阶：插件化扩展新工具
+### 4. 接入浏览器
 
-得益于**插件化动态注册机制**，为 Agent 增加新能力（例如：自动回复私信、自动评论互动）无需修改核心底座代码，只需两步：
-1. 在 `plugins/` 目录下新建 `.py` 文件编写底层逻辑。
-2. 在 `plugins/` 目录下新建同名的 `.json` 文件描述工具大模型参数。
+macOS 桌面通路需要 `".[desktop]"`、系统辅助功能授权与已登录的 Chrome。先运行“检查登录并读取账号状态，不互动、不发布”的任务。
 
-系统下次启动时会自动扫描合并并喂给大模型，**避免了多人协作时的代码冲突**！
+CDP 通路需要加载 `assets/tmwd_cdp_bridge/` Chrome 扩展并初始化桥接配置，**只打开 9222 端口不足以建立连接**。验证码由用户在平台完成。详细步骤见[安装与排障](docs/installation_zh.md)。
 
----
+## 发布为什么可控
 
-## 🗺️ Roadmap
+身份核对、共享额度、提交记录与结果核对一起约束实际动作：
 
-- [x] 全模态联合视觉认知（图+视频帧+文案）
-- [x] 后置认知去重 & 知识融合
-- [x] 动静分离 SkillHub 架构（跨平台可扩展）
-- [x] CDP 真实浏览器接管 + 防风控
-- [x] 纯视觉感知-动作引擎（Set-of-Marks + 三级结晶缓存，跨平台零选择器）
-- [x] Streamlit 可视化界面
-- [x] 小红书首发支持
-- [ ] 抖音 适配（沿用现有 soft_skills/ 经验库）
-- [ ] B站 / 视频号 适配
-- [ ] 微博 / Twitter / Instagram 海外赛道适配
-- [ ] 多账号矩阵孵化（每号独立 `soft_skills/`）
-- [ ] 评论区智能互动 & 私信自动回复
-- [ ] 数据看板：曝光/点赞/转化数据回流，反哺 Agent 自调优
+- 默认测试控制开启，后台队列暂停；写操作需要绑定健康账号的稳定 ID。
+- 共享提交间隔至少 30 分钟，单账号滚动 24 小时最多 4 次提交、其中发布最多 1 次。保存、互动、修改与删除也占额度。这些是项目工程上限，不是平台安全承诺。
+- 提交前写入记录；结果未知保留首次错误，只读核对，禁止自动重发。
+- 账号出现限制提示时停止写操作，保留任务与草稿；验证码和权限问题由平台流程处理。
 
----
+Studio 只监听本机，具备文件读写、代码执行和浏览器操作权限，适合自己管理模型、账号与素材的创作者及技术运营团队。目前没有多账号权限隔离或托管 SaaS。规则见[账号与测试控制](docs/NEW_ACCOUNT_TEST_CONTROL.md)。
 
-## 🤝 贡献与社区
+## 扩展你自己的方法
 
-欢迎 Star ⭐ / Fork / PR！
-- 🐛 提 Issue 反馈 Bug 或建议新功能
-- 💡 分享你的 `soft_skills/` 配置，帮助社区共建赛道知识库
-- 📮 商业合作 / MCN 接入：欢迎联系仓库 Owner
+```text
+agentmain.py / agent_loop.py  会话与任务循环
+ga.py / llmcore.py            工具执行与模型协议
+frontends/studio.py           Studio 入口
+frontends/desktop/static/     原生 HTML / CSS / JavaScript 界面
+tools/                       浏览器、媒体、发布与任务原子能力
+skills/registry.json          技能依赖与工具前置规则
+skills/                      工作流与可复用内容方法
+```
 
----
+Skills 管判断与方法，Tools 管动作。依赖方向是 `Router → Workflow → Capability → Resource`。动态工具需要成对的 `tool.json` 和同步 `execute.py`；`web_`、`xhs_` 前缀保留给内置受控工具。见[技能架构](skills/ARCHITECTURE.md)。
 
-## 🙏 致谢
+欢迎贡献平台页面变化的最小复现、媒体理解案例与可复用 Skill。后续重点是补齐已接入但未实测的 RSS、多合集与权限入口，完善跨系统浏览器验收。
 
-- [火山引擎 - 豆包大模型](https://www.volcengine.com/)：提供 Doubao VLM、Seedream 4.5、Seedance 2.0 全套能力
-- [Streamlit](https://streamlit.io/)：极简 Web UI 框架
-- [MoviePy](https://zulko.github.io/moviepy/)：让视频压缩告别 ffmpeg
+## 验证与文档
 
-## 📄 License
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python scripts/check_skill_graph.py
+python -m build
+```
 
-[MIT](LICENSE) — 自由商用，欢迎二次开发。
+[当前能力](docs/CAPABILITY_MATRIX.md) · [日常文档导航](docs/DOCUMENTATION_MAP.md) · [本轮验证](docs/RELEASE_VALIDATION.md) · [GitHub 展示与曝光建议](docs/OPEN_SOURCE_DISCOVERABILITY.md)
 
----
-*Powered by Doubao VLM & Seedream 4.5 & Seedance 2.0*
+## License
+
+[MIT](LICENSE)。基于 [GenericAgent](https://github.com/lsdefine/GenericAgent) 框架扩展；上游与借鉴来源见[来源说明](docs/PROJECT_SOURCES.md)。模型服务、平台账号与素材仍受各自条款和版权约束。

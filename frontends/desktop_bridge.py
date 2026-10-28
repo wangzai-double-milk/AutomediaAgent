@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-GenericAgent Web2 Bridge.
+AutoMedia Studio Bridge.
 
 Clear split:
-1) AgentManager: owns GenericAgent instances, sessions and histories.
+1) AgentManager: owns agent instances, sessions and histories.
 2) Transport: HTTP is the command/data channel; WebSocket only pushes small
    session-state notifications.
 
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio, contextlib, importlib, json, os, re, sys
 import mimetypes
+import hashlib
 import threading, time, traceback, uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,12 +39,21 @@ from aiohttp import web, WSMsgType
 APP_DIR = Path(__file__).resolve().parent
 
 
+def studio_ui_revision() -> str:
+    """Identify the UI files so launchers open a fresh document after an update."""
+    static_dir = APP_DIR / "desktop" / "static"
+    digest = hashlib.sha256()
+    for path in sorted(static_dir.rglob("*")):
+        if path.is_file() and path.suffix in (".html", ".css", ".js"):
+            digest.update(path.relative_to(static_dir).as_posix().encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
 def find_default_ga_root() -> Path:
     candidates = [
         APP_DIR / "..",
         APP_DIR / ".." / "..",
-        APP_DIR / ".." / "GenericAgent",
-        APP_DIR / ".." / ".." / "GenericAgent",
     ]
     for p in candidates:
         root = p.resolve()
@@ -84,6 +94,14 @@ class AgentManager:
     def __init__(self):
         self.lock = threading.RLock()
         self.ga_root = str(DEFAULT_GA_ROOT)
+        explicit = os.environ.get("AUTOMEDIA_CONFIG")
+        candidates = [Path(explicit).resolve()] if explicit else [
+            Path.cwd() / "config.json",
+            Path.home() / ".config/automedia/config.json",
+            Path(self.ga_root) / "config.json",
+        ]
+        self._config_path = str(next(
+            (path for path in candidates if path.is_file()), candidates[0]))
         self.config: Dict[str, Any] = {}
         self.sessions: Dict[str, Session] = {}
         self.active_session_id: Optional[str] = None
@@ -95,7 +113,7 @@ class AgentManager:
 
     @property
     def mykey_path(self) -> str:
-        return str(Path(self.ga_root) / "mykey.py")
+        return self._config_path
 
     def ensure_ga_import_path(self) -> Path:
         root = Path(self.ga_root).resolve()
@@ -104,20 +122,14 @@ class AgentManager:
         return root
 
     def make_agent(self, sess: Session):
-        root = self.ensure_ga_import_path()
-        old_cwd = os.getcwd()
-        try:
-            os.chdir(sess.cwd or str(root))
-            agentmain = importlib.import_module("agentmain")
-            GA = getattr(agentmain, "GenericAgent")
-            agent = GA()
-            agent.inc_out = True
-            agent.verbose = True
-            threading.Thread(target=agent.run, daemon=True, name=f"GA-{sess.id}").start()
-            return agent
-        finally:
-            with contextlib.suppress(Exception):
-                os.chdir(old_cwd)
+        self.ensure_ga_import_path()
+        agentmain = importlib.import_module("agentmain")
+        GA = getattr(agentmain, "GenericAgent")
+        agent = GA()
+        agent.inc_out = True
+        agent.verbose = True
+        threading.Thread(target=agent.run, daemon=True, name=f"GA-{sess.id}").start()
+        return agent
 
     def list_model_profiles(self):
         self.ensure_ga_import_path()
@@ -337,7 +349,7 @@ class AgentManager:
                 if isinstance(ret, str):
                     full = ret
             else:
-                full = "GenericAgent object has no put_task/run method"
+                full = "Agent object has no put_task/run method"
             if not full:
                 full = "(completed)"
             if sess.cancel_requested:
@@ -526,6 +538,15 @@ class AgentManager:
             except Exception:
                 tabs = []
 
+        if not result["browserConnected"] and sys.platform == "darwin":
+            try:
+                from tools.xhs_desktop import readiness, _lock
+                from ga import _browser_action_lock
+                with _browser_action_lock, _lock:
+                    result["desktop"] = readiness()
+            except Exception as exc:
+                result["desktop"] = {"available": False, "reason": str(exc)}
+
         for key, definition in definitions.items():
             matches = [
                 tab for tab in tabs
@@ -541,6 +562,12 @@ class AgentManager:
                 "nickname": "",
                 "openUrl": definition["openUrl"],
             }
+            if not result["browserConnected"]:
+                item.update({
+                    "label": "尚未接管",
+                    "detail": "浏览器桥没有已连接标签页，当前无法判断打开或登录状态",
+                    "connectionRequired": True,
+                })
             if matches:
                 item.update({
                     "state": "check_required",
@@ -573,6 +600,32 @@ class AgentManager:
                     pass
             result["platforms"][key] = item
 
+        from tools.xhs_account import status as account_status
+        from tools.xhs_test_control import status as test_status
+        result["testControl"] = test_status()
+        result["accountAccess"] = account_status()
+        if result["accountAccess"]["writes_blocked"]:
+            result["platforms"]["xiaohongshu"].update({
+                "state": "restricted", "label": "账号访问受限",
+                "detail": "平台提示账号存在风险，已停止账号写操作。请在平台处理后重新读取自己的主页。",
+                "writesBlocked": True,
+            })
+        test = result["testControl"]
+        if test.get("enabled") and result["accountAccess"]["writes_blocked"]:
+            result["platforms"]["xiaohongshu"]["detail"] += (
+                " 新测试账号尚未绑定，请登录新账号后核对绑定；后台发布已暂停。"
+                if not test.get("binding") else " 当前测试账号写操作已暂停，后台发布已暂停。")
+        if test.get("enabled") and not result["accountAccess"]["writes_blocked"]:
+            available = test.get("write_ready", {})
+            binding = test.get("binding") or {}
+            result["platforms"]["xiaohongshu"].update({
+                "state": "check_required" if not available.get("ok") else "ready",
+                "label": "等待测试账号" if not binding else "测试冷却中" if not available.get("ok") else "测试账号已绑定",
+                "detail": ((available.get("reason") or binding.get("nickname") or "测试写操作已暂停")
+                           + (f" 下次可提交：{available['retry_after']}" if available.get("retry_after") else "")
+                           + " 后台发布已暂停。"),
+                "writesBlocked": not available.get("ok"),
+            })
         result["overallReady"] = all(
             item["state"] == "ready" for item in result["platforms"].values()
         )
@@ -782,10 +835,10 @@ class AgentManager:
                 add_media(payload.get("output"), "output", "修图版本")
             if step == "image_generate_done":
                 add_media(payload.get("output"), "output", "生成图片")
-            if step == "publish_draft_start":
+            if step in ("publish_draft_start", "publish_start"):
                 publish_items = [
-                    add_media(value, "publish", "待发布图片")
-                    for value in payload.get("images") or []
+                    add_media(value, "publish", "待发布素材")
+                    for value in payload.get("files") or payload.get("images") or []
                 ]
                 draft = {
                     "title": str(payload.get("title") or ""),
@@ -795,13 +848,25 @@ class AgentManager:
                     "visibility": "",
                     "status": "preparing",
                     "images": [item["id"] for item in publish_items if item],
+                    "kind": str(payload.get("kind") or "image"),
+                    "scheduleAt": payload.get("schedule_at"),
                 }
+            elif step == "publish_prepared" and draft:
+                draft["status"] = "prepared" if payload.get("preview") else "preparing"
+                draft["visibility"] = {
+                    "self": "仅自己可见", "public": "公开可见", "friends": "仅互关好友可见",
+                }.get(payload.get("visibility"), str(payload.get("visibility") or ""))
+                draft["scheduleAt"] = payload.get("schedule_at")
+            elif step == "publish_result" and draft:
+                draft["status"] = "published" if payload.get("verified") else "uncertain"
+            elif step == "draft_saved" and draft:
+                draft["status"] = "draft"
             elif step == "publish_visibility" and draft:
                 draft["visibility"] = str(payload.get("now") or payload.get("visibility") or "")
             elif step == "publish_draft_done" and draft:
                 draft["status"] = "published"
                 draft["visibility"] = str(payload.get("visibility") or draft.get("visibility") or "")
-            elif step == "publish_draft_error" and draft:
+            elif step in ("publish_draft_error", "publish_error") and draft:
                 draft["status"] = "error"
 
         try:
@@ -1033,6 +1098,8 @@ _MAX_UPLOAD_BYTES = 500 * 1024 * 1024
 
 def _save_image_data(data_url: str, img_id: str) -> str:
     """Save a data URL to disk, return absolute path."""
+    if not isinstance(img_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", img_id):
+        raise web.HTTPBadRequest(text="invalid attachment id")
     # data:image/png;base64,xxxxx
     if "," in data_url:
         header, b64 = data_url.split(",", 1)
@@ -1046,8 +1113,11 @@ def _save_image_data(data_url: str, img_id: str) -> str:
         ext = "webp"
     elif "gif" in header:
         ext = "gif"
-    fpath = _UPLOAD_DIR / f"{img_id}.{ext}"
-    fpath.write_bytes(base64.b64decode(b64))
+    content = base64.b64decode(b64, validate=True)
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise web.HTTPRequestEntityTooLarge(max_size=_MAX_UPLOAD_BYTES, actual_size=len(content))
+    fpath = _UPLOAD_DIR / f"media-{uuid.uuid4().hex[:16]}.{ext}"
+    fpath.write_bytes(content)
     return str(fpath)
 
 
@@ -1174,20 +1244,33 @@ async def ws_handler(request):
 # Transport layer: HTTP command/data API
 # ---------------------------------------------------------------------------
 
-def cors_headers():
+def cors_headers(origin=None):
     return {
-        "Access-Control-Allow-Origin": "*",
+        **({"Access-Control-Allow-Origin": origin} if origin else {}),
         "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
+        "Vary": "Origin",
     }
 
 
 @web.middleware
 async def cors_middleware(request, handler):
+    try:
+        host = urlsplit("//" + request.host).hostname
+    except ValueError:
+        host = None
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        raise web.HTTPForbidden(text="Studio accepts localhost requests only")
+    origin = request.headers.get("Origin")
+    expected = f"{request.scheme}://{request.host}"
+    if origin is not None and origin != expected:
+        raise web.HTTPForbidden(text="untrusted request origin")
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        raise web.HTTPForbidden(text="cross-site requests are not allowed")
     if request.method == "OPTIONS":
-        return web.Response(status=204, headers=cors_headers())
+        return web.Response(status=204, headers=cors_headers(origin))
     resp = await handler(request)
-    for k, v in cors_headers().items():
+    for k, v in cors_headers(origin).items():
         resp.headers[k] = v
     return resp
 
@@ -1207,16 +1290,21 @@ async def read_json(request) -> dict:
 
 
 async def status_handler(request):
+    from tools.xhs_test_control import status as test_status
     return json_ok({
         "ok": True,
         "running": True,
         "ready": True,
+        "uiRevision": studio_ui_revision(),
         "gaRoot": manager.ga_root,
         "mykeyPath": manager.mykey_path,
         "sessionCount": len(manager.sessions),
         "activeSessionId": manager.active_session_id,
         "ws": "/ws",
+        "testControl": test_status(),
         "transport": {"http": True, "wsEventsOnly": True},
+        "contentQueue": dict(request.app["content_queue_worker"].status)
+        if "content_queue_worker" in request.app else {"running": False},
     })
 
 
@@ -1370,6 +1458,7 @@ async def artifact_handler(request):
         response.content_type = content_type
     response.headers["Cache-Control"] = "private, max-age=2"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'"
     return response
 
 
@@ -1377,6 +1466,60 @@ async def platform_status_handler(request):
     force = request.query.get("force", "").lower() in ("1", "true", "yes")
     status = await asyncio.to_thread(manager.platform_status, force)
     return json_ok(status)
+
+
+def studio_state():
+    """Read persistent budgets and a bounded queue summary without browser IO."""
+    from datetime import datetime, timedelta, timezone
+    from tools import task
+    from tools.xhs_test_control import status as test_status
+    control = test_status()
+    public_control = {key: control[key] for key in (
+        "enabled", "background_paused", "binding", "limits", "message"
+    ) if key in control}
+    for kind in ("write_ready", "publish_ready"):
+        if kind in control:
+            public_control[kind] = {key: control[kind][key] for key in (
+                "ok", "status", "reason", "retry_after", "retry_in_seconds"
+            ) if key in control[kind]}
+    bound = control.get("binding") or {}
+    if bound:
+        public_control["binding"] = {key: bound[key] for key in (
+            "owner_id", "nickname", "bound_at"
+        ) if key in bound}
+    now = datetime.now(timezone.utc)
+    quota = {"available": False}
+    if isinstance(control.get("reservations"), list) and control.get("limits"):
+        recent = [entry for entry in control["reservations"]
+                  if entry["owner_id"] == bound.get("owner_id")
+                  and datetime.fromisoformat(entry["at"]) > now - timedelta(hours=24)]
+        used_writes = len(recent)
+        used_publishes = sum(entry["kind"] == "publish" for entry in recent)
+        quota = {
+            "available": True, "usedWrites": used_writes, "usedPublishes": used_publishes,
+            "remainingWrites": max(0, control["limits"]["rolling_24h"] - used_writes),
+            "remainingPublishes": max(0, control["limits"]["publish_24h"] - used_publishes),
+        }
+    path = Path(task.TASKS_ROOT) / "content_queue.json"
+    try:
+        # Writers atomically replace this file. This reader never claims or edits.
+        items = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            raise ValueError("invalid queue")
+        queue = {"ok": True, "total": len(items), "items": [{
+            "id": item.get("id"),
+            "title": (item.get("publication") or {}).get("title") or (item.get("spec") or {}).get("title") or "",
+            "state": item.get("state"), "runAfter": item.get("run_after"),
+            "account": (item.get("publication") or {}).get("expected_account"),
+            "sameAccount": bool(bound.get("owner_id") and item.get("owner_id") == bound["owner_id"]),
+        } for item in items[-50:]]}
+    except (OSError, ValueError, TypeError, AttributeError):
+        queue = {"ok": False, "total": None, "items": []}
+    return {"ok": True, "testControl": public_control, "quota": quota, "queue": queue}
+
+
+async def studio_state_handler(request):
+    return json_ok(await asyncio.to_thread(studio_state))
 
 
 async def platform_open_handler(request):
@@ -1407,7 +1550,7 @@ async def path_open_handler(request):
     data = await read_json(request)
     kind = data.get("kind", "")
     if kind == "mykey":
-        target = Path(manager.ga_root) / "mykey.py"
+        target = Path(manager.mykey_path)
     else:
         target = Path(data.get("path") or data.get("target") or manager.ga_root)
     target = target.resolve()
@@ -1447,6 +1590,7 @@ def create_app():
     app.router.add_get("/upload/{upload_id}", upload_preview_handler)
     app.router.add_get("/browser-preview/{tab_id}", browser_preview_handler)
     app.router.add_get("/platform/status", platform_status_handler)
+    app.router.add_get("/studio/state", studio_state_handler)
     app.router.add_post("/platform/open", platform_open_handler)
     app.router.add_post("/path/open", path_open_handler)
 
@@ -1454,20 +1598,45 @@ def create_app():
     static_dir = APP_DIR / "desktop" / "static"
 
     async def index_handler(request):
-        return web.FileResponse(static_dir / "index.html")
+        html = (static_dir / "index.html").read_text(encoding="utf-8")
+
+        def version_asset(match):
+            name = match.group(2)
+            path = (static_dir / name).resolve()
+            if not path.is_relative_to(static_dir.resolve()) or not path.is_file():
+                return match.group(0)
+            revision = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+            return f'{match.group(1)}{name}?v={revision}{match.group(3)}'
+
+        html = re.sub(
+            r'((?:src|href)=")([^"]+\.(?:css|js))(?:\?[^"]*)?(")',
+            version_asset, html,
+        )
+        return web.Response(
+            text=html, content_type="text/html",
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
 
     app.router.add_get("/", index_handler)
     app.router.add_static("/", static_dir, show_index=False)
 
     async def on_startup(app):
         hub.loop = asyncio.get_running_loop()
+        from tools import task, xhs_queue
+        worker = xhs_queue.QueueWorker(task)
+        app["content_queue_worker"] = worker
+        worker.start()
 
     app.on_startup.append(on_startup)
+    async def on_cleanup(app):
+        app["content_queue_worker"].stop()
+
+    app.on_cleanup.append(on_cleanup)
     return app
 
 
 if __name__ == "__main__":
     host = os.environ.get("BRIDGE_HOST", "127.0.0.1")
     port = int(os.environ.get("BRIDGE_PORT", "14168"))
-    print(f"GenericAgent Web2 bridge: http://{host}:{port}  ws://{host}:{port}/ws", file=sys.stderr)
+    print(f"AutoMedia Studio: http://{host}:{port}  ws://{host}:{port}/ws", file=sys.stderr)
     web.run_app(create_app(), host=host, port=port, print=None)

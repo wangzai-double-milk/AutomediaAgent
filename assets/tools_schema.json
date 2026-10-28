@@ -8,17 +8,17 @@
         "type": "object",
         "properties": {
           "images": {
-          "type": "array",
-          "items": {
-            "type": "string"
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "需要分析的图片 URL 或本地绝对路径列表（任意平台，支持多图）。"
           },
-          "description": "需要分析的图片 URL 或本地绝对路径列表（任意平台，支持多图）。"
-        },
-        "video_url": {
-          "type": "string",
-          "description": "需要分析的视频 URL。可以是真实视频流 URL（mp4/m3u8/douyinvod 等），也可以是抖音等视频详情页 URL；工具会先尝试解析真实视频流/临时下载再交给 Files API 整段理解。超长/超大视频（超过 512MB 上限）会自动用 moviepy 压成审查代理（降分辨率/码率，不动原片，用完即删）再上传，长片单次推理会给足超时。若返回“未能解析真实视频流”，必须换方式获取真实流，不能把页面标题当视频内容。若结果开头带“【⚠️未完成·不可作为最终/通过结论】”，说明输出被长度截断、仅为半截，必须分镜/分段拆开重问后再下结论，不得直接采信。"
-        },
-        "title": {
+          "video_url": {
+            "type": "string",
+            "description": "需要分析的视频 URL。可以是真实视频流 URL（mp4/m3u8/douyinvod 等），也可以是抖音等视频详情页 URL；工具会先尝试解析真实视频流/临时下载再交给 Files API 整段理解。超长/超大视频（超过 512MB 上限）会自动用 moviepy 压成审查代理（降分辨率/码率，不动原片，用完即删）再上传，长片单次推理会给足超时。若返回“未能解析真实视频流”，必须换方式获取真实流，不能把页面标题当视频内容。若结果开头带“【⚠️未完成·不可作为最终/通过结论】”，说明输出被长度截断、仅为半截，必须分镜/分段拆开重问后再下结论，不得直接采信。"
+          },
+          "title": {
             "type": "string",
             "description": "可选：内容标题，作为辅助上下文。"
           },
@@ -60,21 +60,33 @@
           },
           "new_points": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "本样本新增的知识点；没有则传空数组"
           },
           "revised_points": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "本样本修正或推翻的既有结论；没有则传空数组"
           },
           "evidence_refs": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "支撑增量判断的来源引用"
           }
         },
-        "required": ["item_id", "platform", "has_new", "new_points", "revised_points"]
+        "required": [
+          "item_id",
+          "platform",
+          "has_new",
+          "new_points",
+          "revised_points"
+        ]
       }
     }
   },
@@ -249,17 +261,6 @@
   {
     "type": "function",
     "function": {
-      "name": "start_long_term_update",
-      "description": "Start distilling long-term memory. Call when discovering info worth remembering (env facts/user prefs/lessons learned). Skip if memory already updated or in autonomous flow. Must call when a task that took 15+ turns is completed",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
       "name": "web_scan",
       "description": "Get simplified HTML and tab list. Removes hidden/floating/covered elements. Call after switching pages",
       "parameters": {
@@ -387,7 +388,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_review",
-      "description": "Xiaohongshu food cover strict-mode review (Doubao VLM). ⚠️ HARD REQUIREMENT: callers MUST first scrape viral covers from xiaohongshu/douyin and pass their local paths via reference_images — strict-mode scoring depends on viral comparison (viral_patterns/gaps_vs_viral/roast all rely on this). See skills/hard_skills/xhs_review/SKILL.md for full flow. Returns: score / verdict (PASS|REWORK|REPHOTO) / dimensions / viral_patterns / gaps_vs_viral / issues / edit_prompts / additional_shots_needed / roast / title_hints / summary",
+      "description": "分析一张小红书内容图片并返回 verdict（PASS|REWORK|REPHOTO）、问题、修图/重拍建议与标题方向。传入爆款参考图时额外输出 viral_patterns、gaps_vs_viral 和 roast；不传时执行单图诊断。完整流程见 skills/soft_skills/xhs_edit/SKILL.md。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -404,7 +405,7 @@
             "items": {
               "type": "string"
             },
-            "description": "STRONGLY RECOMMENDED 3-5 viral covers (paths/URLs). Without it only SOLO review runs — no viral_patterns/gaps_vs_viral/roast"
+            "description": "可选的同品类爆款封面路径或 URL；推荐 3-5 张，用于对比诊断。"
           }
         },
         "required": [
@@ -417,7 +418,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_edit",
-      "description": "Doubao Seedream 4.5 i2i edit. Two uses: (A) beauty edits per review.edit_prompts; (B) DRAW ANNOTATIONS on the original — red arrows + Chinese labels teaching the user how to reshoot (e.g. 'red arrow above main dish labeling 加蒸汽'). Per skills/hard_skills/xhs_review/SKILL.md, ≥2 unsuccessful rounds MUST drop to REPHOTO and stop editing.",
+      "description": "使用配置的图片编辑模型进行图生图编辑或批注，输入原图和明确的局部修改指令，返回本地结果路径。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -448,7 +449,7 @@
     "type": "function",
     "function": {
       "name": "xhs_image_generate",
-      "description": "Call Doubao Seedream 4.5 text-to-image to generate a brand-new image. Atomic capability. Used for: cover fallback / reference shots / composite scenes",
+      "description": "使用配置的图片生成模型创建新图片，返回本地结果路径。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -476,7 +477,7 @@
     "type": "function",
     "function": {
       "name": "xhs_publish_note",
-      "description": "Publish a set of images + caption as a Xiaohongshu note set to 「仅自己可见」(self-only) (creator center https://creator.xiaohongshu.com/publish/publish). NEW FLOW (2026-06, replaces draft-box/暂存 since phone & desktop drafts don't sync): upload → fill title/body/tags → CDP-pierce set visibility to 仅自己可见 → verify → then click 发布. HARD RULE: never clicks 发布 unless visibility is confirmed as self-only (anti mis-public). Prereqs: CDP bridge attached, creator center logged in, Chrome window focused in foreground (cdp_mouse_click needs focus). Flow: skills/hard_skills/xhs_publish/SKILL.md.",
+      "description": "发布小红书图文。请显式传 visibility（默认 self，亦支持 public/friends），以使用回读验证的新发布链路；可选北京时间定时与 preview 预填。上传、正文、话题 chip、可见性和时间须验证；提交结果不确定禁止重发。读取 skills/hard_skills/xhs_publish/SKILL.md。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -485,7 +486,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Local image paths (uploaded in order), 1-9. Usually task_dir/edited_*.png or viral_refs/ reuse"
+            "description": "Local image paths (uploaded in order), 1-18, png/jpg/jpeg/webp, each at most 32MB. Usually task_dir/edited_*.png or viral_refs/ reuse"
           },
           "title": {
             "type": "string",
@@ -500,8 +501,25 @@
             "items": {
               "type": "string"
             },
-            "description": "8-12 topic tags, with or without # (tool auto-prefixes). MUST be extracted from viral_meta.json[covers[*].content.tags] — no fabrication"
-          }
+            "description": "最多 10 个真实检索话题，可带 #；必须形成页面话题 chip，不编造热词"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": ["self", "public", "friends"],
+            "default": "self"
+          },
+          "schedule_at": {
+            "type": "string",
+            "description": "ISO 8601 定时时间；无时区按北京时间，范围当前 1 小时至 14 天"
+          },
+          "preview": {
+            "type": "boolean",
+            "default": false,
+            "description": "只预填与回读，不发布，不称作已保存草稿"
+          },
+          "save_draft": {"type": "boolean", "default": false, "description": "保存并核对浏览器本地草稿，目前走 desktop"},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"},
+          "expected_account": {"type": "string", "description": "desktop 创作中心页眉账号名称，运行前回读核对"}
         },
         "required": [
           "images",
@@ -575,10 +593,10 @@
     "type": "function",
     "function": {
       "name": "xhs_check_login",
-      "description": "Check Xiaohongshu login status by reading the page's window.__INITIAL_STATE__ user info (zero VLM, stable & fast). Returns {ok, logged_in, nickname, user_id}. Call this first before any read/interact flow to confirm the CDP-bridged Chrome is logged in.",
+      "description": "Check Xiaohongshu login through connected CDP or the existing Chrome accessibility tree. Returns observed user_id; desktop nickname can be null. Call before read/interact flows.",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {"transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"}}
       }
     }
   },
@@ -586,10 +604,10 @@
     "type": "function",
     "function": {
       "name": "xhs_list_feeds",
-      "description": "Get the Xiaohongshu home recommendation feed (reads window.__INITIAL_STATE__.feed.feeds, zero VLM). Returns a simplified note list, each with id + xsec_token + xsec_source (all three are inputs for get_feed_detail / like_feed / favorite_feed / post_comment; pass xsec_source through verbatim to avoid token/source mismatch risk control). xsec_source here is 'pc_feed'. Use this to discover notes to interact with.",
+      "description": "Read home recommendations using CDP or existing Chrome desktop. Desktop returns only rendered cards with observed IDs, exact source links and tokens; unknown counts/media stay null. Open notes via these links; preserve token provenance.",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {"transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"}}
       }
     }
   },
@@ -601,6 +619,7 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
           "keyword": {
             "type": "string",
             "description": "Search keyword"
@@ -620,10 +639,11 @@
     "type": "function",
     "function": {
       "name": "xhs_get_feed_detail",
-      "description": "Get a note's full detail + comments (reads window.__INITIAL_STATE__.note.noteDetailMap, zero VLM). Requires feed_id + xsec_token obtained from list_feeds / search_feeds. When load_comments=true it scrolls to lazy-load comments. Also detects blocked/deleted/private notes.",
+      "description": "Read note detail and comments via CDP or desktop. Desktop opens an exact currently observed source link or reads the current matching detail, groups author/body/topics and loaded comments within the overlay, and reports unavailable media/state as null. load_comments does not claim exhaustive pagination.",
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
           "feed_id": {
             "type": "string",
             "description": "Note id (from list_feeds / search_feeds result)"
@@ -653,10 +673,11 @@
     "type": "function",
     "function": {
       "name": "xhs_user_profile",
-      "description": "Get a user's profile info + note list (reads window.__INITIAL_STATE__.user, zero VLM). Requires user_id + xsec_token obtained from a note/search result.",
+      "description": "Read a user profile via CDP or desktop. Desktop follows the exact observed author/self href, returns visible page and notes, and leaves unparsed profile fields null.",
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
           "user_id": {
             "type": "string",
             "description": "Target user id"
@@ -685,6 +706,9 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
+          "owner_id": {"type": "string", "description": "Required for desktop; actual login user_id"},
+          "operation_id": {"type": "string", "description": "Use a new stable intent ID for a deliberately new interaction cycle"},
           "feed_id": {
             "type": "string",
             "description": "Note id"
@@ -718,6 +742,9 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
+          "owner_id": {"type": "string", "description": "Required for desktop; actual login user_id"},
+          "operation_id": {"type": "string", "description": "Use a new stable intent ID for a deliberately new interaction cycle"},
           "feed_id": {
             "type": "string",
             "description": "Note id"
@@ -751,6 +778,9 @@
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
+          "owner_id": {"type": "string", "description": "Required for desktop; actual login user_id"},
+          "action": {"type": "string", "enum": ["send", "prepare", "clear"], "default": "send", "description": "Desktop prepare/clear never submit"},
           "feed_id": {
             "type": "string",
             "description": "Note id"
@@ -780,10 +810,14 @@
     "type": "function",
     "function": {
       "name": "xhs_reply_comment",
-      "description": "Reply to a specific comment under a note (stable selector first, scrolls to locate the comment). Requires feed_id + xsec_token + content, plus at least one of comment_id / user_id to locate the target comment.",
+      "description": "Reply to a specific comment. Desktop requires owner_id + target author user_id + exact target_content, verifies quoted composer and persisted indented thread; no fabricated comment ID. CDP uses comment_id/user_id. Read xhs_interact Skill first.",
       "parameters": {
         "type": "object",
         "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
+          "owner_id": {"type": "string"},
+          "action": {"type": "string", "enum": ["prepare", "send", "clear"], "default": "send", "description": "Desktop: prepare doesn't submit; clear requires exact current content"},
+          "target_content": {"type": "string", "description": "Desktop requires full original comment text from visible detail, together with user_id"},
           "feed_id": {
             "type": "string",
             "description": "Note id"
@@ -839,7 +873,9 @@
           },
           "evidence_manifest": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "支撑该技能的可追溯证据列表，至少一条，包含来源平台、样本ID/URL和验证状态"
           },
           "overwrite": {
@@ -877,6 +913,334 @@
           "category",
           "content"
         ]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_prepare_note",
+      "description": "预填并验证图文或视频发布页，不点击发布，不保存草稿。先读取 xhs_publish Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "images": {"type": "array", "items": {"type": "string"}},
+          "video": {"type": "string", "description": "与 images 二选一；本地绝对路径"},
+          "title": {"type": "string"},
+          "desc": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+          "schedule_at": {"type": "string", "description": "ISO 8601，北京时间"},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"},
+          "expected_account": {"type": "string"}
+        },
+        "required": ["title", "desc"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_publish_video",
+      "description": "上传视频，等待处理完成，回读标题正文话题、可见性、定时后发布。结果不确定时禁止重发。先读取 xhs_publish Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "video": {"type": "string", "description": "MP4/MOV/M4V/WEBM 本地绝对路径"},
+          "title": {"type": "string"},
+          "desc": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+          "schedule_at": {"type": "string"},
+          "preview": {"type": "boolean", "default": false},
+          "save_draft": {"type": "boolean", "default": false},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"},
+          "expected_account": {"type": "string"}
+        },
+        "required": ["video", "title", "desc"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_publish_longform",
+      "description": "网页长文编辑、正文回读、一键排版、生成笔记图片后预填/存草稿/发布；复用单次提交日志。desktop通路。先读取xhs_publish Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "longform_body": {"type": "string", "description": "长文原文，1–16000字符；会核对非空白文本"},
+          "title": {"type": "string", "description": "最终笔记标题不超过20个UTF-16字符"},
+          "desc": {"type": "string", "description": "最终笔记正文描述，不超过1000个UTF-16字符"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+          "schedule_at": {"type": "string"},
+          "preview": {"type": "boolean", "default": false},
+          "save_draft": {"type": "boolean", "default": false},
+          "transport": {"type": "string", "enum": ["auto", "desktop"], "default": "desktop"},
+          "expected_account": {"type": "string"}
+        },
+        "required": ["longform_body", "title", "desc"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_publish_podcast",
+      "description": "上传播客音频和封面，等待上传成功后预填/存草稿/发布。音频10分钟至2小时、不超过1GB；封面不超过32MB。desktop通路。先读取xhs_publish Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "audio": {"type": "string", "description": "m4a/mp3/wav/flac/aac本地绝对路径"},
+          "cover": {"type": "string", "description": "png/jpg/jpeg/webp封面本地绝对路径"},
+          "title": {"type": "string"},
+          "desc": {"type": "string", "description": "可使用00:00等时间点"},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+          "schedule_at": {"type": "string"},
+          "preview": {"type": "boolean", "default": false},
+          "save_draft": {"type": "boolean", "default": false},
+          "transport": {"type": "string", "enum": ["auto", "desktop"], "default": "desktop"},
+          "expected_account": {"type": "string"}
+        },
+        "required": ["audio", "cover", "title", "desc"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_notifications",
+      "description": "读取评论提及、赞藏或关注通知；分页去重并附页面证据。先读取 xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string", "enum": ["comments", "likes", "follows"], "default": "comments"},
+          "pages": {"type": "integer", "minimum": 1, "maximum": 10, "default": 1},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_follow_user",
+      "description": "关注/取消关注，读取前后状态，目标已达到则跳过。先读取 xhs_interact Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"},
+          "owner_id": {"type": "string", "description": "Desktop requires owner ID and current note feed_id to bind the author"},
+          "operation_id": {"type": "string", "description": "Use a new stable intent ID for a deliberately new interaction cycle"},
+          "feed_id": {"type": "string"},
+          "user_id": {"type": "string"},
+          "xsec_token": {"type": "string"},
+          "xsec_source": {"type": "string", "default": "pc_note"},
+          "unfollow": {"type": "boolean", "default": false}
+        },
+        "required": ["user_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_own_profile",
+      "description": "由真实登录身份读取自己的主页和作品。先读取 xhs_manage Skill。",
+      "parameters": {"type": "object", "properties": {"transport": {"type": "string", "enum": ["auto", "desktop", "cdp"], "default": "auto"}}}
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_test_account",
+      "description": "读取测试账号、冷却额度和后台暂停状态；bind按已登录主站健康主页的稳定ID与昵称核对并绑定新账号，保留旧账号记录与任务。pause暂停后台。不可降低上限或恢复后台。先读取xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["status", "bind", "pause"], "default": "status"},
+          "owner_id": {"type": "string"},
+          "nickname": {"type": "string"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_creator_page",
+      "description": "从创作者网页发现入口并读取作品、草稿、账号/笔记/粉丝数据或其他功能。返回原始可见数据和证据链接；入口缺失/权限限制明确标记。先读取 xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "area": {"type": "string", "enum": ["notes", "overview", "audience", "note_metrics", "drafts", "collections", "longform", "podcast", "products", "live", "ads", "messages", "account"], "default": "notes"},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_manage_note",
+      "description": "按笔记 ID 和当前账号身份定位自己的作品，打开编辑、修改正文/可见性或删除。保存只命中明确修改按钮，提交不确定禁止重试。先读取 xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note_id": {"type": "string"},
+          "owner_id": {"type": "string", "description": "从真实登录状态取得，必须与当前账号一致"},
+          "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"},
+          "expected_account": {"type": "string", "description": "desktop必填，匹配创作中心当前账号页眉"},
+          "target_title": {"type": "string", "description": "desktop必填，从管理页读取的原笔记标题"},
+          "published_at": {"type": "string", "description": "desktop原笔记发布时间，可消除同名歧义"},
+          "action": {"type": "string", "enum": ["prepare_edit", "edit", "visibility", "delete"], "default": "prepare_edit"},
+          "title": {"type": "string"},
+          "desc": {"type": "string"},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"]}
+        },
+        "required": ["note_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_messages",
+      "description": "网页私信会话列表、读取、预填、清除测试预填和单次发送。按真实owner_id、recipient_id、recipient_name核对；先写发送记录，结果不确定禁止重复发送。先读取xhs_manage Skill；发送需用户授权。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["list", "read", "prepare", "send", "clear"], "default": "list"},
+          "recipient_id": {"type": "string", "description": "从实际/chat/ID或用户主页取得"},
+          "recipient_name": {"type": "string", "description": "会话头实际昵称，必须一致"},
+          "owner_id": {"type": "string", "description": "从当前网页我链接取得，必须一致"},
+          "text": {"type": "string", "maxLength": 500, "description": "prepare/send单行消息；clear必须与当前输入完全一致"},
+          "transport": {"type": "string", "enum": ["desktop", "auto"], "default": "desktop"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_drafts",
+      "description": "当前Chrome本地草稿：按类型列出、按真实标题+保存时间打开/删除/直接发布。无稳定草稿ID时null；发布已有媒体不重传，默认self，单次提交独立核对。先读取xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["list", "open", "delete", "publish"], "default": "list"},
+          "transport": {"type": "string", "enum": ["auto", "desktop"], "default": "desktop", "description": "仅macOS桌面通路，不支持CDP重试"},
+          "kind": {"type": "string", "enum": ["image", "video", "longform", "podcast"], "default": "image"},
+          "expected_account": {"type": "string", "description": "真实创作者页眉账号标签"},
+          "title": {"type": "string", "description": "open/delete使用草稿列表的完整标题"},
+          "saved_at": {"type": "string", "description": "open/delete/publish使用实际保存时间 YYYY-MM-DD HH:MM:SS"},
+          "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+          "schedule_at": {"type": "string", "description": "publish可选定时ISO8601，北京时间1小时至14天"}
+        },
+        "required": ["expected_account"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_collections",
+      "description": "普通合集创建/列表/选择/独立核对，普通create/verify/select会保存并重开当前图文草稿，简介无法独立核对；播客合集创建/列表/编辑/空合集删除。未知ID为null，账号受限停止写操作。先读取xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["inspect", "prepare", "create", "cancel", "list", "open", "edit", "delete", "verify", "select"], "default": "inspect"},
+          "transport": {"type": "string", "enum": ["auto", "desktop"], "default": "desktop"},
+          "kind": {"type": "string", "enum": ["note", "podcast"], "default": "podcast"},
+          "expected_account": {"type": "string"},
+          "target_title": {"type": "string", "description": "普通合集必填，当前图文草稿编辑器原标题"},
+          "target_name": {"type": "string", "description": "普通select/verify或播客open/edit/delete需列表实际原标题"},
+          "target_description": {"type": "string", "description": "播客open/edit/delete需列表实际简介共同定位"},
+          "name": {"type": "string", "maxLength": 20},
+          "description": {"type": "string", "maxLength": 100, "description": "普通合集最多50 UTF-16字符；播客最多100"},
+          "cover": {"type": "string", "description": "播客合集PNG/JPG/JPEG绝对路径，最大5MB"}
+        },
+        "required": ["expected_account"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_rss",
+      "description": "播客RSS真实表单读取/预填/解析地址/请求验证码/确认/取消。须用户真实feed、合集和邮箱验证；缺项返回needs_input；请求验证码与最终确认单次落盘，独立结果未知停止。先读取xhs_manage Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["inspect", "prepare", "fetch", "request_code", "confirm", "cancel"], "default": "inspect"},
+          "transport": {"type": "string", "enum": ["auto", "desktop"], "default": "desktop"},
+          "expected_account": {"type": "string"},
+          "rss_url": {"type": "string"},
+          "start_time": {"type": "string", "description": "网页起始时间输入格式，准备后回读"},
+          "collection_name": {"type": "string", "description": "页面真实已有播客合集名称"},
+          "expected_email": {"type": "string", "description": "解析feed后自动显示的邮箱，须匹配"},
+          "verification_code": {"type": "string", "description": "用户收到的邮箱验证码，不写入操作日志"},
+          "accept_agreement": {"type": "boolean", "default": false}
+        },
+        "required": ["expected_account"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "xhs_content_queue",
+      "description": "持久化内容队列：入队、列表、取消、执行到期项、仅重试提交前失败、读取作品核对中断项。running/uncertain 不自动重发。执行前读取 xhs_publish Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["enqueue", "list", "cancel", "retry", "run_due", "reconcile"], "default": "list"},
+          "publication": {
+            "type": "object",
+            "properties": {
+              "images": {"type": "array", "items": {"type": "string"}},
+              "video": {"type": "string"},
+              "owner_id": {"type": "string", "description": "测试队列必填，来自已绑定健康主页的稳定账号ID"},
+              "audio": {"type": "string"},
+              "cover": {"type": "string"},
+              "longform_body": {"type": "string"},
+              "title": {"type": "string"},
+              "desc": {"type": "string"},
+              "tags": {"type": "array", "items": {"type": "string"}},
+              "visibility": {"type": "string", "enum": ["self", "public", "friends"], "default": "self"},
+              "schedule_at": {"type": "string"},
+              "transport": {"type": "string", "enum": ["auto", "cdp", "desktop"], "default": "auto"},
+              "expected_account": {"type": "string", "description": "desktop 队列必填；执行时匹配创作中心页眉"}
+            },
+            "required": ["title", "desc"]
+          },
+          "run_after": {"type": "string", "description": "开始执行的 ISO 8601 时间，不等于平台 schedule_at"},
+          "item_id": {"type": "string"},
+          "note_id": {"type": "string"},
+          "state": {"type": "string", "enum": ["queued", "running", "done", "failed", "uncertain", "cancelled"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 5, "default": 1}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_desktop",
+      "description": "macOS 下使用现有 Chrome 的真实无障碍树、普通键鼠操作。浏览器桥缺失时可用。snapshot 返回当前 ref/snapshot_id；press/fill 必须使用同次观察的引用，动作后重新 snapshot 核对。先读取 perception_action Skill。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {"type": "string", "enum": ["snapshot", "press", "fill", "type", "key", "scroll", "reveal", "hover"], "default": "snapshot"},
+          "ref": {"type": "string"},
+          "snapshot_id": {"type": "string"},
+          "text": {"type": "string", "description": "fill替换文本；type仅向实际聚焦的文本框逐字符输入"},
+          "replace": {"type": "boolean", "default": false, "description": "type前选中全部文字"},
+          "amount": {"type": "integer", "minimum": -1200, "maximum": 1200, "description": "scroll 的像素量，负值向下", "default": -600},
+          "key": {"type": "string", "enum": ["enter", "tab", "escape", "select_all", "address", "go_to_folder", "back", "end"]}
+        }
       }
     }
   }

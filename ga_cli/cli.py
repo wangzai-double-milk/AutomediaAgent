@@ -1,5 +1,5 @@
 """
-ga_cli/cli.py - GenericAgent 命令行分发系统
+ga_cli/cli.py - AutoMedia Agent 命令行分发系统
 
 通过 python -m ga_cli <命令> 或 ga <命令> 调用
 """
@@ -41,9 +41,12 @@ def launch_frontend(cmd_parts, args=None):
     os.chdir(PROJECT_DIR)
     proc = subprocess.Popen(full_cmd)
     try:
-        proc.wait()
+        returncode = proc.wait()
+        if returncode:
+            raise SystemExit(returncode)
     except KeyboardInterrupt:
         proc.terminate()
+        proc.wait()
         sys.exit(0)
 
 
@@ -53,55 +56,19 @@ COMMANDS = {
         "desc": "启动对话、行动流、浏览器观察和学习增量一体化界面",
         "cmd": ["python", "{FRONTENDS}/studio.py"],
     },
-    "gui": {
-        "help": "启动桌面GUI (qtapp)",
-        "desc": "启动基于 PyQt5 的完整桌面聊天界面（气泡代码高亮、文件拖拽、历史搜索）",
-        "cmd": ["python", "{FRONTENDS}/qtapp.py"],
-    },
-    "configure": {
-        "help": "运行初始配置向导 (configure_mykey.py)",
-        "desc": "首次安装后配置 API Key、模型参数等基础设置",
-        "cmd": ["python", "{PROJECT_DIR}/assets/configure_mykey.py"],
-    },
-    "hub": {
-        "help": "启动 Hub 管理器 (launcher)",
-        "desc": "启动 hub 前端管理面板（系统托盘 + 浏览器界面）",
-        "cmd": ["python", "{PROJECT_DIR}/hub.pyw"],
-    },
-    "tui": {
-        "help": "启动终端 TUI (tui_v3，推荐)",
-        "desc": "启动当前推荐的 scrollback-first 终端界面，适合纯终端环境或 SSH",
-        "cmd": ["python", "{FRONTENDS}/tui_v3.py"],
-    },
-    "tui1": {
-        "help": "启动旧版终端 TUI v1 (tuiapp)",
-        "desc": "启动旧版 Textual 终端图形界面，保留用于兼容排障",
-        "cmd": ["python", "{FRONTENDS}/tuiapp.py"],
-    },
-    "tui2": {
-        "help": "启动终端 TUI v2 (tuiapp_v2)",
-        "desc": "启动增强版终端图形界面（Textual v2），更多功能更好的体验",
-        "cmd": ["python", "{FRONTENDS}/tuiapp_v2.py"],
-    },
     "cli": {
         "help": "启动 CLI 对话 (agentmain)",
         "desc": "启动命令行交互对话模式，最轻量的使用方式",
         "cmd": ["python", "{PROJECT_DIR}/agentmain.py"],
     },
-    "launch": {
-        "help": "启动 webview 桌面壳 (launch.pyw)",
-        "desc": "以原生窗口形式包装 stapp Web 界面（基于 pywebview）",
-        "cmd": ["python", "{PROJECT_DIR}/launch.pyw"],
+    "autonomous": {
+        "help": "启动小红书自主学习循环（会产生真实账号动作）",
+        "desc": "按 INTERVAL 周期研究内容、沉淀技能，并发布仅自己可见的演练笔记",
+        "cmd": ["python", "{PROJECT_DIR}/agentmain.py", "--reflect", "{REFLECT}/autonomous.py"],
     },
     "status": {
         "help": "检查运行状态",
-        "desc": "检查当前是否已有 GenericAgent 进程在运行",
-        "cmd": None,
-        "internal": True,
-    },
-    "update": {
-        "help": "更新项目 (git pull + pip install)",
-        "desc": "从 Git 拉取最新代码并更新依赖",
+        "desc": "检查当前是否已有 AutoMedia 进程在运行",
         "cmd": None,
         "internal": True,
     },
@@ -134,45 +101,27 @@ def cmd_status():
     """检查进程状态"""
     import psutil
     running = [p for p in psutil.process_iter(['pid', 'name', 'cmdline'])
-               if p.info['cmdline'] and any('agentmain' in c for c in p.info['cmdline'])]
+               if p.info['cmdline'] and any(
+                   marker in ' '.join(p.info['cmdline'])
+                   for marker in ('agentmain.py', 'frontends/studio.py'))]
     if running:
-        print(f"🟢 运行中: {len(running)} 个进程")
+        print(f"🟢 AutoMedia 运行中: {len(running)} 个进程")
         for p in running:
             print(f"   PID {p.info['pid']} — {' '.join(p.info['cmdline'][:3])}")
     else:
-        print("⚫ GenericAgent 进程未运行")
-
-
-def cmd_update():
-    """git pull + pip install"""
-    os.chdir(PROJECT_DIR)
-    print("🔄 git pull...")
-    r = subprocess.run(["git", "pull"], capture_output=True, text=True)
-    print(r.stdout)
-    if r.returncode != 0:
-        print(r.stderr)
-    print("📦 pip install...")
-    r2 = subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."],
-                        capture_output=True, text=True)
-    print(r2.stdout[-500:] if r2.stdout else "")
-    if r2.returncode != 0:
-        print(r2.stderr[-500:])
+        print("⚫ AutoMedia 未运行")
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="ga",
-        description="GenericAgent 全局命令入口",
+        description="AutoMedia Agent 命令入口",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             示例:
-              ga gui               启动桌面 GUI
               ga studio            启动 AutoMedia 可视化工作台
-              ga tui               启动推荐终端 TUI (v3)
-              ga tui1              启动旧版终端 TUI (v1)
-              ga tui2              启动旧版终端 TUI (v2)
               ga cli               启动最轻量命令行交互
-              ga launch            启动 webview 桌面壳
+              ga autonomous        启动自主学习循环（真实账号动作）
               ga list              列出所有命令
         """),
     )
@@ -183,7 +132,7 @@ def main():
     args, unknown = parser.parse_known_args()
 
     if args.version:
-        print("GenericAgent v0.1.0")
+        print("AutoMedia Agent v0.2.0")
         return
 
     cmd = args.command
@@ -200,10 +149,6 @@ def main():
 
     if cmd == "status":
         cmd_status()
-        return
-
-    if cmd == "update":
-        cmd_update()
         return
 
     if cmd not in COMMANDS:

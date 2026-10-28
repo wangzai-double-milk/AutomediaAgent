@@ -1,4 +1,4 @@
-// GenericAgent Web2 browser bridge adapter.
+// AutoMedia Studio browser bridge adapter.
 // HTTP is the command/data channel. WebSocket only carries small state events.
 (() => {
   'use strict';
@@ -6,8 +6,8 @@
   const listeners = new Map();
   let ws = null;
   let cachedBridgeReady = null;
-  const bridgeBase = `${location.protocol}//${location.hostname}:14168`;
-  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:14168/ws`;
+  const bridgeBase = location.origin;
+  const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 
   function on(channel, cb) {
     if (typeof cb !== 'function') return () => {};
@@ -104,6 +104,8 @@
       }
       case 'platform/status':
         return http(`/platform/status${params.force ? '?force=1' : ''}`);
+      case 'studio/state':
+        return http('/studio/state');
       case 'platform/open':
         return http('/platform/open', { method: 'POST', body: params || {} });
       case 'session/cancel': {
@@ -125,6 +127,7 @@
   }
 
   window.ga = {
+    bridgeUrl: bridgeBase,
     platform: navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'win32',
     startBridge: async () => { connectWs(); return http('/status'); },
     stopBridge: async () => ({ ok: true }),
@@ -138,6 +141,7 @@
     pollSession: (sessionId, afterId = 0) => rpc('session/poll', { sessionId, afterId }),
     getActivity: (sessionId) => rpc('session/activity', { sessionId }),
     getPlatformStatus: (force = false) => rpc('platform/status', { force }),
+    getStudioState: () => rpc('studio/state'),
     openPlatform: (platform) => rpc('platform/open', { platform }),
     rpc,
     onBridgeMessage: (cb) => on('bridge-message', cb),

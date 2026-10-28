@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools import web_vision  # noqa: E402
 from tools import xhs_actions  # noqa: E402
+import ga  # noqa: E402
 
 
 def test_missing_page_fingerprint_is_not_verified():
@@ -15,6 +16,26 @@ def test_missing_page_fingerprint_is_not_verified():
     assert web_vision._fp_changed(valid, {}) is False
     assert web_vision._fp_changed({'url': 'https://example.test'}, valid) is False
     assert web_vision._fp_changed(valid, dict(valid, popups=1)) is True
+
+
+def test_xhs_tab_selection_preserves_compatible_session_pin(monkeypatch):
+    sessions = [
+        {"id": "account-a", "url": "https://www.xiaohongshu.com/explore"},
+        {"id": "account-b", "url": "https://www.xiaohongshu.com/user/profile"},
+    ]
+    fake = type("Driver", (), {
+        "default_session_id": "account-a",
+        "get_all_sessions": lambda self: sessions,
+    })()
+    monkeypatch.setattr(ga, "driver", fake)
+    token = ga._browser_session.set("account-b")
+    try:
+        result = ga.ensure_xhs_tab()
+    finally:
+        ga._browser_session.reset(token)
+
+    assert result["tab_id"] == "account-b"
+    assert result["reason"] == "pinned"
 
 
 def test_like_waits_for_state_without_second_toggle():

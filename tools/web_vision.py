@@ -828,7 +828,6 @@ def som_click(target_desc: str, save_screenshot_to: str = None, verify: bool = T
     _logger.info('[som] som_click 开始 target=%r verify=%s max_scrolls=%s', target_desc, verify, max_scrolls)
     scrolled_dirs = []  # 记录滚过的方向，避免来回死循环
     last_reason = ''
-    verify_retried = False  # “点中编号但页面没变”时允许重新枚举重试一次（应对动态浮层/下拉时机问题）
     for attempt in range(max_scrolls + 1):
         _logger.info('[som] === attempt %d/%d (已滚动 %s) ===', attempt, max_scrolls, scrolled_dirs)
         mark = _som_mark()
@@ -884,19 +883,15 @@ def som_click(target_desc: str, save_screenshot_to: str = None, verify: bool = T
                         'screenshot': shot_path, 'source': 'som', 'som_id': som_id, 'scrolls': attempt}
             time.sleep(0.4)
             verified = _fp_changed(fp_before, _page_fingerprint())
-            # 点中了编号但页面没变：可能是动态浮层/下拉的枚举时机问题，重新枚举再点一次
-            if not verified and verify and not verify_retried:
-                verify_retried = True
-                _logger.info('[som] #%s 点击后页面无变化，等待浮层稳定后重新枚举重试一次', som_id)
-                time.sleep(0.6)
-                continue
+            # A dispatched click may have succeeded without changing the fingerprint.
+            # Observe only; replaying can undo toggles or duplicate submissions.
             learn = _learn_and_cache(target_desc, cx, cy) if verified else {'ok': False}
             _logger.info('[som] som_click 完成 #%s @(%s,%s) verified=%s learned=%s selector=%s',
                          som_id, cx, cy, verified, bool(learn.get('ok')), learn.get('selector', ''))
             return {
-                'ok': bool(verified), 'verified': bool(verified), 'x': cx, 'y': cy, 'target': target_desc,
+                'ok': bool(verified), 'verified': bool(verified), 'dispatched': True, 'x': cx, 'y': cy, 'target': target_desc,
                 'reason': (f"som #{som_id}: {pick.get('reason', '')}" if verified
-                           else f"已点击 #{som_id} 但页面无变化（可能不是目标/不可点），建议换 target_desc"),
+                           else f"已点击 #{som_id}，结果尚未验证；请检查目标状态，不要重复点击"),
                 'screenshot': shot_path, 'source': 'som', 'som_id': som_id,
                 'learned': bool(learn.get('ok')), 'selector': learn.get('selector', ''),
                 'scrolls': attempt,
@@ -980,8 +975,12 @@ def visual_click(target_desc: str, save_screenshot_to: str = None, verify: bool 
                 'reason': f"cache hit: {hit.get('selector', '')[:60]}",
                 'screenshot': '', 'source': 'cache',
             }
-        # 缓存点了没反应（可能坐标失效）→ 不直接失败，落到 Set-of-Marks 重定位
-        _logger.info('[visual_click] cache 命中但点击无变化，回退 Set-of-Marks: %s', target_desc)
+        return {
+            'ok': False, 'verified': False, 'dispatched': True,
+            'x': cx, 'y': cy, 'target': target_desc,
+            'reason': '已发送点击但结果尚未验证；请检查目标状态，不要重复点击',
+            'screenshot': '', 'source': 'cache',
+        }
     else:
         _logger.info('[visual_click] 缓存未命中(%s)，走 Set-of-Marks', hit.get('reason'))
 

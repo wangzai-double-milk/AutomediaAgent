@@ -11,6 +11,7 @@ from tools import image as media  # noqa: E402
 
 def test_multipart_upload_uses_streaming_encoder():
     old_post = media.requests.post
+    old_key = media.API_KEY
     captured = {}
 
     class Response:
@@ -27,6 +28,7 @@ def test_multipart_upload_uses_streaming_encoder():
         return Response()
 
     try:
+        media.API_KEY = 'test-only-key'
         media.requests.post = post
         with tempfile.NamedTemporaryFile(suffix='.mp4') as video:
             video.write(b'x' * 2048)
@@ -41,6 +43,7 @@ def test_multipart_upload_uses_streaming_encoder():
         assert captured['headers']['Content-Type'].startswith('multipart/form-data; boundary=')
     finally:
         media.requests.post = old_post
+        media.API_KEY = old_key
 
 
 def test_review_parse_failure_is_not_pass():
@@ -65,6 +68,19 @@ def test_video_detection_does_not_match_plain_word_video():
     assert media._is_video_media('/tmp/video_notes.jpg') is False
     assert media._is_video_media('https://example.test/assets/video-cover.webp') is False
     assert media._is_video_media('https://example.test/media/clip.mp4?token=x') is True
+
+
+def test_image_preparation_failure_uses_media_specific_message():
+    original = media.image_to_url
+    try:
+        media.image_to_url = lambda value: (_ for _ in ()).throw(
+            ValueError("unreadable image"))
+        result = media.analyze_image("/tmp/broken.jpg", "inspect")
+    finally:
+        media.image_to_url = original
+
+    assert result.startswith("[Error] 图片准备失败")
+    assert "视频预处理" not in result
 
 
 def test_upload_poll_failure_deletes_remote_file():

@@ -344,7 +344,8 @@ def _read_interact_state(feed_id):
     if isinstance(data, dict):
         entry = data.get(feed_id) or {}
         info = ((entry.get('note') or {}).get('interactInfo')) or {}
-        return bool(info.get('liked')), bool(info.get('collected'))
+        return (bool(info['liked']) if 'liked' in info else None,
+                bool(info['collected']) if 'collected' in info else None)
     return None, None
 
 
@@ -432,6 +433,10 @@ def favorite_feed(feed_id, xsec_token, unfavorite=False, xsec_source='pc_feed'):
 
 
 def _toggle_interact(feed_id, xsec_token, target, selector, kind, xsec_source='pc_feed'):
+    from tools.xhs_account import assert_writable
+    assert_writable()
+    from tools.xhs_test_control import preflight
+    preflight(transport="cdp")
     if not feed_id or not xsec_token:
         return {'ok': False, 'reason': 'feed_id / xsec_token 必填'}
     _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
@@ -466,6 +471,10 @@ def _toggle_interact(feed_id, xsec_token, target, selector, kind, xsec_source='p
 
 def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
     """发表评论：点输入框 → 输入 → 点提交。"""
+    from tools.xhs_account import assert_writable
+    assert_writable()
+    from tools.xhs_test_control import preflight
+    preflight(transport="cdp")
     if not (feed_id and xsec_token and content):
         return {'ok': False, 'reason': 'feed_id / xsec_token / content 必填'}
     _navigate(_feed_detail_url(feed_id, xsec_token, xsec_source), wait=2.0)
@@ -502,6 +511,10 @@ def post_comment(feed_id, xsec_token, content, xsec_source='pc_feed'):
 
 def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_source='pc_feed'):
     """回复指定评论：滚动找到目标评论 → 点回复 → 输入 → 提交。"""
+    from tools.xhs_account import assert_writable
+    assert_writable()
+    from tools.xhs_test_control import preflight
+    preflight(transport="cdp")
     if not (feed_id and xsec_token and content):
         return {'ok': False, 'reason': 'feed_id / xsec_token / content 必填'}
     if not (comment_id or user_id):
@@ -510,8 +523,6 @@ def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_
     block = _check_accessible()
     if block:
         return {'ok': False, 'reason': block, 'blocked': True}
-    before_count = _comment_occurrences(content)
-
     # 滚动加载并定位目标评论的回复按钮
     found = _locate_and_click_reply(comment_id, user_id)
     if not found:
@@ -520,6 +531,7 @@ def reply_comment(feed_id, xsec_token, content, comment_id='', user_id='', xsec_
     if not _input_into(SELECTORS['comment_input_field'], content):
         return {'ok': False, 'selector_hit': False, 'reason': '未找到回复输入框'}
     time.sleep(0.6)
+    before_count = _comment_occurrences(content)
     if not _click_selector(SELECTORS['comment_submit']):
         return {'ok': False, 'selector_hit': False, 'reason': '未找到提交按钮'}
     verified, after_count = _wait_comment_visible(content, before_count)

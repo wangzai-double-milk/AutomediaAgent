@@ -1,5 +1,5 @@
 {
-  "_README": "复制本文件为 config.json，填入你的火山引擎 API Key 即可。一把 Key 全套通用（LLM 大脑 + 审图 VLM + 生图/改图）。模型名一般无需改动。",
+  "_README": "首次复制为 config.json，填入自己的 API Key；模型 ID 必须在自己的方舟账号中可用。示例 ID 不保证已开通，请按账号权限替换。不要提交 config.json。",
   "volc_apikey": "ark-在这里填入你的火山引擎APIKey",
   "volc_apibase": "https://ark.cn-beijing.volces.com/api/v3",
   "models": {

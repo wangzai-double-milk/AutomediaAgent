@@ -1,29 +1,31 @@
-# 启动指令
+# 启动速查
 
-每次想跑这个小红书运营 agent，按下面来即可。
+首次安装与模型配置见 [README](README.md#快速开始)；排障见[安装说明](docs/installation_zh.md)。
 
-## 终端 UI（推荐）
-
-```bash
-请用请用帮我打开小红书创作中心（creator.xiaohongshu.com），
-切到那个标签页，然后用 web_execute_js 在页面里 fetch 我的笔记列表接口，
-把最近 10 篇笔记的标题、阅读量、点赞、收藏、评论 列成表格给我。
-
-如果你不确定接口路径，可以先用 web_scan 看页面，
-或者打开 F12 网络面板那种思路：让我去"数据中心 → 笔记数据"页面，
-你再观察当前页面 fetch 出去的请求，找到正确接口再调。
-```
-
-## 桌面端（Streamlit / Webview）
+macOS / Linux，在项目根目录：
 
 ```bash
-cd /Users/bytedance/Desktop/各种agent的使用尝试/xiaohongshu-agent
 source .venv/bin/activate
-python launch.pyw
+python -m ga_cli studio
 ```
 
-## 备注
+Windows：
 
-- 模型后端：豆包 `doubao-seed-2-0-pro-260215`（已在 `mykey.py` 里配好）。
-- 虚拟环境：`.venv`，Python 3.12。如果命令找不到 `python`，先确认已 `source .venv/bin/activate`。
-- 退出 TUI：`Ctrl+C`。
+```powershell
+.\.venv\Scripts\python.exe -m ga_cli studio
+```
+
+默认打开 <http://127.0.0.1:14168>，保持终端运行，`Ctrl+C` 停止。端口已占用时：
+
+```bash
+BRIDGE_PORT=14169 python -m ga_cli studio
+```
+
+- 当前本地 Run 配置使用14169；命令本身默认14168。已有服务不会被自动终止。
+- 无需 Node.js。服务重启后刷新旧标签，让页面重新连接；未被服务接收的输入和素材会保留。
+- macOS 桌面操作需安装 `".[desktop]"`，授权辅助功能并保持 Chrome 登录。
+- CDP 通路需加载 `assets/tmwd_cdp_bridge/`；只开启9222不足以连接。
+- 文本终端：`python -m ga_cli cli`。
+- 自主模式：`python -m ga_cli autonomous`，会产生真实账号动作，需先完成对应授权和账号控制。
+- 发布默认 self；preview 只预填，save_draft 是写操作。后台队列默认暂停，结果未知只读核对。
+- 账号限制时停止写操作，保留任务与草稿。规则见[账号与测试控制](docs/NEW_ACCOUNT_TEST_CONTROL.md)。

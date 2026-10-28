@@ -1,11 +1,9 @@
 import json, re, os
 from dataclasses import dataclass
 from typing import Any, Optional
-try: from plugins.hooks import trigger as _hook
-except ImportError: _hook = lambda *a, **k: None
 
 try:
-    from plugins.dynamic_tool_manager import DynamicToolManager
+    from tools.dynamic import DynamicToolManager
 except ImportError:
     class DynamicToolManager:
         @staticmethod
@@ -38,15 +36,11 @@ class BaseHandler:
         method_name = f"do_{tool_name}"
         if hasattr(self, method_name):
             args['_index'] = index; args['_tool_num'] = tool_num
-            _hook('tool_before', locals())
             ret = yield from try_call_generator(getattr(self, method_name), args, response)
-            _hook('tool_after', locals())
             return ret
         elif DynamicToolManager.has_tool(tool_name):
             args['_index'] = index; args['_tool_num'] = tool_num
-            _hook('tool_before', locals())
             ret = yield from try_call_generator(DynamicToolManager.execute, tool_name, args, self, response)
-            _hook('tool_after', locals())
             return ret
         elif tool_name == 'bad_json': return StepOutcome(None, next_prompt=args.get('msg', 'bad_json'), should_exit=False)
         else:
@@ -69,6 +63,18 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     # Merge dynamic tools schema
     dynamic_schemas = DynamicToolManager.get_schemas()
     if dynamic_schemas:
+        static_names = {
+            (schema.get("function") or {}).get("name")
+            for schema in tools_schema
+        }
+        duplicate_names = sorted(
+            (schema.get("function") or {}).get("name")
+            for schema in dynamic_schemas
+            if (schema.get("function") or {}).get("name") in static_names
+        )
+        if duplicate_names:
+            raise ValueError(
+                f"Dynamic tools conflict with built-in tools: {duplicate_names}")
         tools_schema = list(tools_schema) + dynamic_schemas
 
     messages = [
@@ -78,7 +84,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
     turn = 0
     exit_reason = {}
     handler.max_turns = max_turns
-    _hook('agent_before', locals())
     while turn < handler.max_turns:
         turn += 1; turnstr = f'LLM Running (Turn {turn}) ...'
         if handler.parent.task_dir: turnstr = f'Turn {turn} ...'
@@ -86,8 +91,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
         if yield_info: yield {'turn': turn}
         yield f"\n\n{turnstr}\n\n"
         if turn%10 == 0: client.last_tools = ''  # 每10轮重置一次工具描述
-        _hook('turn_before', locals())
-        _hook('llm_before', locals())
         response_gen = client.chat(messages=messages, tools=tools_schema)
         if verbose:
             response = yield from response_gen
@@ -96,7 +99,6 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             response = exhaust(response_gen)
             cleaned = _clean_content(response.content)
             if cleaned: yield cleaned + '\n'
-        _hook('llm_after', locals())
 
         if not response.tool_calls: tool_calls = [{'tool_name': 'no_tool', 'args': {}}]
         else: tool_calls = [{'tool_name': tc.function.name, 'args': json.loads(tc.function.arguments), 'id': tc.id}
@@ -120,6 +122,22 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             except StopIteration as e: outcome = e.value
             
             if outcome.should_exit:
+                data = outcome.data if isinstance(outcome.data, dict) else {}
+                if data.get("status") == "deferred":
+                    yield f"\n{str(data.get('reason') or '测试写操作已暂停。')[:1000]}\n"
+                    if data.get("retry_after"):
+                        yield f"\n下次可提交时间：{data['retry_after']}（ISO 8601）\n"
+                    yield "\n本轮操作未提交；不会等待或自动重复尝试。\n"
+                if data.get("status") == "restricted":
+                    access = data.get("account_access") or {}
+                    if access.get("writes_blocked"):
+                        owner = data.get("user_id") or access.get("user_id")
+                        if owner:
+                            yield f"\n账号ID：{str(owner)[:80]}\n"
+                        reason = access.get("reason") or data.get("msg") or "账号访问受限"
+                        yield f"\n{str(reason)[:1000]}\n\n账号写操作已暂停。\n"
+                    else:
+                        yield "\n当前操作受限，已停止本轮操作。\n"
                 exit_reason = {'result': TERMINAL_WAITING_USER, 'data': outcome.data}; break
             if not outcome.next_prompt: 
                 exit_reason = {'result': TERMINAL_COMPLETED, 'data': outcome.data}; break
@@ -132,10 +150,8 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             if len(handler._done_hooks) == 0 or exit_reason.get('result', '') == TERMINAL_WAITING_USER: break
             next_prompts.add(handler._done_hooks.pop(0))
         next_prompt = handler.turn_end_callback(response, tool_calls, tool_results, turn, '\n'.join(next_prompts), exit_reason)
-        _hook('turn_after', locals())
         messages = [{"role": "user", "content": next_prompt, "tool_results": tool_results}]   # just new message, history is kept in *Session
     if exit_reason: handler.turn_end_callback(response, tool_calls, tool_results, turn, '', exit_reason)
-    _hook('agent_after', locals())
     return exit_reason or {'result': TERMINAL_MAX_TURNS}
 
 

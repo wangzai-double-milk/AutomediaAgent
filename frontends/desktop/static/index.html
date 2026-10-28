@@ -5,15 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AutoMedia Studio</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="studio.css?v=playful-1">
+  <link rel="stylesheet" href="execution-feed.css?v=2">
 </head>
 <body>
-  <div id="app">
-    <aside id="main" class="mission-dock" aria-label="任务对话">
+  <div id="app" data-studio-view="scene">
       <header id="topbar">
         <div class="brand-mark"><span>AM</span></div>
         <div class="brand-copy">
           <strong>AutoMedia</strong>
-          <small>你的 AI 运营搭档</small>
+          <small>把想法拍成作品</small>
         </div>
         <button id="setup-entry" class="setup-entry" type="button" title="检查平台登录状态">
           <i></i><span>平台</span>
@@ -31,6 +32,22 @@
         </div>
       </header>
 
+    <nav class="studio-nav" aria-label="创作工作区">
+      <span class="nav-caption">工作区</span>
+      <button type="button" data-studio-nav="scene" aria-current="page"><span>⌂</span>小片场</button>
+      <button type="button" data-studio-nav="assets"><span>▧</span>素材桌<b id="studio-asset-count">0</b></button>
+      <button type="button" data-studio-nav="ideas"><span>✦</span>灵感</button>
+      <button type="button" data-studio-nav="rhythm"><span>◷</span>发布节奏</button>
+      <div class="nav-foot"><span class="nav-flower">✳</span><small>慢慢发布<br>大胆创作</small></div>
+    </nav>
+
+    <aside id="main" class="mission-dock" aria-label="任务对话">
+      <div id="chat-resizer" role="separator" tabindex="0" aria-label="调整对话高度，上下方向键调整" aria-orientation="horizontal" aria-valuemin="180" aria-valuemax="650" aria-valuenow="240"></div>
+      <div class="chat-heading">
+        <strong><i></i>对话舱</strong><span>想法从这里开拍</span>
+        <button id="chat-search" type="button" aria-label="搜索对话">搜索</button>
+        <button id="chat-toggle" type="button" aria-expanded="false">展开对话 ↗</button>
+      </div>
       <div id="search-bar" class="search-bar hidden">
         <input id="search-input" type="text" placeholder="搜索对话…" aria-label="搜索对话">
         <span id="search-count" class="search-count"></span>
@@ -41,9 +58,9 @@
 
       <section id="messages" class="empty">
         <div class="empty-state">
-          <div class="empty-kicker">今天想让它研究什么？</div>
-          <div class="empty-title">给个目标，剩下的交给它</div>
-          <div class="empty-sub">它会自己搜索、刷内容、看素材，并把新发现讲给你听。</div>
+          <div class="empty-kicker">导演，请说</div>
+          <div class="empty-title">今天，开拍什么？</div>
+          <div class="empty-sub">给个目标，看它搜索、拆解，再把想法变成作品。</div>
           <div class="starter-grid">
             <button class="starter-card" data-prompt="调研小红书和抖音最近的内容趋势，持续看到没有新知识为止">
               <span class="starter-icon">↗</span><strong>找近期趋势</strong><small>看看大家最近都在聊什么</small>
@@ -63,13 +80,13 @@
         <div id="composer">
           <div id="image-previews" class="image-previews"></div>
           <input id="media-input" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" multiple hidden>
-          <textarea id="input" rows="1" placeholder="比如：帮我研究最近流行的减脂内容…"></textarea>
+          <textarea id="input" rows="1" aria-label="给 Agent 的任务" placeholder="说个想法，或者去上面抽一张灵感…"></textarea>
           <div class="composer-bottom">
             <div class="composer-hints">
               <button id="attach-btn" class="icon-btn ghost" title="上传图片或视频" aria-label="上传图片或视频">＋<span class="hint-label">素材</span></button>
               <button id="settings-btn" class="icon-btn ghost" title="设置" aria-label="设置">⚙<span class="hint-label">设置</span></button>
             </div>
-            <button id="send-btn" class="send-btn" title="发送">
+            <button id="send-btn" class="send-btn" title="发送" aria-label="发送任务">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 12h14M13 6l6 6-6 6"/>
               </svg>
@@ -82,8 +99,8 @@
     <main id="agent-live" class="agent-world" aria-label="Agent 实时工作现场">
       <header class="world-head">
         <div>
-          <span class="live-eyebrow">LIVE WORKSPACE</span>
-          <h2>看看它正在做什么</h2>
+          <span class="live-eyebrow" id="studio-eyebrow">AUTOMEDIA / ON SET</span>
+          <h2 id="studio-view-title">你的创作小片场<span>来，开个好头。</span></h2>
         </div>
         <div class="world-actions">
           <div id="platform-mini" class="platform-mini" aria-label="平台状态">
@@ -94,7 +111,32 @@
         </div>
       </header>
 
-      <section class="agent-hero">
+      <section class="studio-scene" data-studio-panel="scene" aria-label="可交互的 Agent 工作场景">
+        <div class="scene-floor" id="scene-floor" data-phase="idle" data-status="idle">
+          <div class="scene-label">AM STUDIO <span>01</span></div>
+          <div class="scene-window"><i></i><i></i><i></i><i></i></div>
+          <div class="scene-path" aria-hidden="true"></div>
+          <button type="button" class="station station-research" data-station="research"><span class="station-art"><i></i><b>↗</b></span><strong>观察台</strong><small>搜索 · 看内容</small></button>
+          <button type="button" class="station station-create" data-station="create"><span class="station-art"><i></i><b>✳</b></span><strong>制作桌</strong><small>素材 · 文案</small></button>
+          <button type="button" class="station station-publish" data-station="publish"><span class="station-art"><i></i><b>✓</b></span><strong>出片口</strong><small>核对 · 发布</small></button>
+          <button type="button" id="studio-agent" class="studio-agent" aria-label="查看 Agent 当前动作">
+            <span class="agent-bubble" id="agent-bubble">等你喊开拍</span>
+            <span class="mascot"><i class="mascot-antenna"></i><span class="mascot-face"><i></i><i></i><b></b></span><span class="mascot-body">am</span><i class="mascot-feet"></i></span>
+          </button>
+          <span class="scene-plant" aria-hidden="true">✳<i></i></span>
+          <span class="scene-rug" aria-hidden="true">MAKE SOMETHING GOOD</span>
+          <button id="motion-toggle" type="button" aria-pressed="false">暂停动效</button>
+        </div>
+        <aside class="scene-director">
+          <span class="card-kicker">导演席</span><h3 id="station-title">一人，也能有个片场。</h3>
+          <p id="station-copy">点点工作台，看看每个阶段做什么。Agent 开始任务后，会跟着真实进度走。</p>
+          <div class="scene-state"><i></i><span id="studio-current">待命 · 等待任务</span></div>
+          <button type="button" id="station-action">去灵感区找个开场 ↗</button>
+          <div class="scene-shelf"><span>桌上有</span><strong id="scene-materials">0 个工作对象</strong><small>真实素材、参考帖和文稿</small></div>
+        </aside>
+      </section>
+
+      <section class="agent-hero" data-studio-panel="scene">
         <div class="agent-presence">
           <div class="agent-halo halo-one"></div>
           <div class="agent-halo halo-two"></div>
@@ -118,11 +160,11 @@
         </div>
       </section>
 
-      <nav id="task-pipeline" class="task-pipeline" aria-label="任务阶段">
+      <nav id="task-pipeline" class="task-pipeline" aria-label="任务阶段" data-studio-panel="scene assets">
         <span class="pipeline-empty">任务开始后，这里会显示从准备到交付的每一步</span>
       </nav>
 
-      <section class="live-browser-wall">
+      <section class="live-browser-wall" data-studio-panel="scene">
         <div class="wall-head">
           <div><span class="card-kicker">LIVE BROWSER WALL</span><h3>它同时在看的页面</h3></div>
           <div class="wall-controls">
@@ -136,7 +178,12 @@
         </div>
       </section>
 
-      <section class="creative-workbench">
+      <section class="asset-tools" data-studio-panel="assets">
+        <div><strong>把过程摊在桌上</strong><span>点选素材，留住值得复用的版本。</span></div>
+        <label>筛选<input id="asset-filter" type="search" placeholder="标题、类型、关键词" aria-label="筛选工作区素材"></label>
+        <span id="asset-filter-result" role="status"></span>
+      </section>
+      <section class="creative-workbench" data-studio-panel="assets">
         <div class="focus-workspace">
           <div class="focus-toolbar">
             <div>
@@ -175,7 +222,7 @@
         </aside>
       </section>
 
-      <section id="draft-preview" class="draft-preview hidden">
+      <section id="draft-preview" class="draft-preview hidden" data-studio-panel="assets">
         <div class="draft-status"><i></i><span>发布准备中</span></div>
         <div class="draft-copy">
           <span>准备发布的小红书笔记</span>
@@ -189,7 +236,7 @@
         </div>
       </section>
 
-      <div class="world-bottom">
+      <div class="world-bottom" data-studio-panel="scene">
         <section class="journey-card">
           <div class="card-head">
             <div><span class="card-kicker">WORKING STORY</span><h3>它刚刚做了什么</h3></div>
@@ -210,12 +257,49 @@
         </section>
       </div>
 
-      <section class="browser-strip">
+      <section class="browser-strip" data-studio-panel="scene">
         <div class="browser-strip-head"><span>Agent 当前打开的页面</span><b id="browser-count">0 个页面</b></div>
         <div id="browser-lens" class="browser-lens compact">
           <div class="lens-empty"><strong>暂时没有平台页面</strong></div>
         </div>
       </section>
+
+      <section class="ideas-layout" data-studio-panel="ideas" hidden>
+        <article class="idea-machine">
+          <span class="card-kicker">A LITTLE SPARK</span><h3>给想法转一下。</h3>
+          <p>选个方向，拼一个开场。接下来怎么拍，由你决定。</p>
+          <div class="idea-selects">
+            <label>内容方向<select id="idea-topic"><option>生活方式</option><option>AI 工具</option><option>美食探店</option><option>运动减脂</option><option>旅行记录</option></select></label>
+            <label>作品形式<select id="idea-format"><option>图文笔记</option><option>高节奏短视频</option><option>长文</option><option>播客</option></select></label>
+            <label>切入角度<select id="idea-angle"><option>亲测前后对比</option><option>三个意外发现</option><option>误区拆解</option><option>跟我做一次</option><option>一段小故事</option></select></label>
+          </div>
+          <div class="idea-ticket" id="idea-ticket"><span>YOUR NEXT TAKE</span><h4 id="idea-title">生活方式 × 亲测前后对比</h4><p id="idea-preview"></p><b>✦</b></div>
+          <div class="idea-actions"><button id="idea-shuffle" type="button">↻ 随机抽一张</button><button id="idea-use" type="button">带到对话舱 ↘</button></div>
+          <small>只放入输入框，按发送后 Agent 才会开始。</small>
+        </article>
+        <aside class="studio-notes">
+          <span class="card-kicker">KEEP THE GOOD BITS</span><h3>我的导演便笺</h3>
+          <p>拍法、灵光一闪，或者下次想试的事。</p>
+          <label class="sr-only" for="studio-note">个人创作便笺</label>
+          <textarea id="studio-note" placeholder="比如：保留原片节奏，换角色和背景；压缩移动和等待，让反馈更密…"></textarea>
+          <div><span id="note-status" role="status">保存在当前浏览器</span><button id="note-save" type="button">保存便笺</button></div>
+        </aside>
+      </section>
+
+      <section class="rhythm-layout" data-studio-panel="rhythm" hidden>
+        <article class="rhythm-card">
+          <span class="card-kicker">CREATE MORE / PUBLISH SLOWLY</span><h3>给发布留一点呼吸。</h3>
+          <p id="rhythm-status" role="status">正在读取测试节奏…</p>
+          <div class="quota-head"><strong>滚动 24 小时提交额度</strong><span id="quota-count">—</span></div>
+          <div class="quota-dots" id="quota-dots"></div>
+          <div class="rhythm-stats"><div><span>发布剩余</span><strong id="publish-quota">—</strong></div><div><span>下次可发布</span><strong id="rhythm-next">—</strong></div><div><span>提交最小间隔</span><strong id="rhythm-interval">—</strong></div></div>
+          <div class="rhythm-account"><span>测试账号</span><strong id="rhythm-account">等待核对</strong><p id="rhythm-account-detail"></p></div>
+          <small id="rhythm-policy">项目内部测试上限，不是平台公布的安全阈值。</small>
+          <button id="rhythm-refresh" type="button">刷新节奏</button>
+        </article>
+        <aside class="queue-card"><div><span class="card-kicker">WAITING IN THE WINGS</span><h3>候场作品 <b id="studio-queue-count">0</b></h3></div><p id="queue-status">正在读取队列…</p><div id="studio-queue"></div></aside>
+      </section>
+      <div id="studio-toast" role="status" class="studio-toast" hidden></div>
 
       <div class="friendly-metrics telemetry-hidden" aria-hidden="true">
         <strong id="convergence-status">等待出发</strong><span id="convergence-copy"></span>
@@ -265,7 +349,7 @@
         <div class="modal-header"><h2>设置</h2><button class="icon-btn ghost" id="close-settings">✕</button></div>
         <div class="modal-content">
           <div class="form-row"><label for="cfg-llm">模型</label><select id="cfg-llm"><option value="0">默认 / 自动</option></select><small>选择 Agent 使用的大模型。</small></div>
-          <div class="form-row"><label>API 配置</label><div class="btn-row"><button class="btn" id="open-mykey">打开 mykey.py</button></div><small>模型 API Key 保存在本机配置中。</small></div>
+          <div class="form-row"><label>API 配置</label><div class="btn-row"><button class="btn" id="open-mykey">打开 config.json</button></div><small>模型 API Key 保存在本机配置中。</small></div>
         </div>
         <div class="modal-footer"><button class="btn ghost" id="cancel-settings">取消</button><button class="btn primary" id="save-settings">保存</button></div>
       </div>
@@ -280,7 +364,9 @@
   </div>
 
   <script src="vendor/marked.min.js"></script>
-  <script src="ga-web.js?v=14168-3"></script>
-  <script src="app.js?v=agent-world-4"></script>
+  <script src="ga-web.js?v=studio-1"></script>
+  <script src="execution-feed.js?v=2"></script>
+  <script src="app.js?v=execution-2"></script>
+  <script src="studio.js?v=playful-1"></script>
 </body>
 </html>

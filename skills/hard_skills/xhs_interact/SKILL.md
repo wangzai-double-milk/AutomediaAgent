@@ -5,18 +5,23 @@ tags:
   - xiaohongshu
   - agent_sop
 ---
-# 小红书 数据读取 / 互动 SOP（稳定 selector + __INITIAL_STATE__，零 VLM）
+# 小红书读取与互动
 
 > 触发关键词：刷推荐 / 看首页 / 搜笔记 / 看这条笔记 / 看评论 / 看某人主页 / 点赞 / 收藏 / 评论 / 回复 / 涨互动 / 养号
 
-本本管「读数据 + 做互动」这条线。移植自参考项目 xiaohongshu-mcp，核心是**不靠 VLM、靠前端全局 JSON + 稳定 CSS selector**，又快又稳。
-代码在 [`tools/xhs_actions.py`](../tools/xhs_actions.py)，工具注册在 [`ga.py`](../ga.py)。
+本能力负责「读数据 + 做互动」，优先使用页面结构化状态和稳定 selector。
+代码在 [`tools/xhs_actions.py`](../../../tools/xhs_actions.py)，工具注册在
+[`ga.py`](../../../ga.py)。
 
 ## 0. 前置（每次必须）
 
-1. **CDP bridge 已接管已登录 Chrome**（和审图/发布共用同一条 bridge）。
+1. `transport=auto/desktop/cdp`。CDP已连接时使用原页面通路；desktop在已登录Chrome
+   使用实际无障碍控件，不需开启CDP、修改策略或读取Cookie。
 2. **先 `xhs_check_login`** 确认 `logged_in=true`。未登录直接停，让用户去登录，不要继续。
-3. 所有读取都靠 `window.__INITIAL_STATE__`：工具内部已自动导航 + 轮询等待它出现；若返回 `reason: no_initial_state`，多半是没在小红书页 / 页面没加载完 / 被风控，重试一次仍失败就停下报告。
+3. desktop写操作必须传入登录工具返回的真实`owner_id`。关注还需当前笔记`feed_id`，
+   将真实作者绑定`user_id`。没有绑定不能操作其他账号。
+4. desktop代码在`tools/xhs_interact_desktop.py`。点赞/收藏图标状态先观察，
+   单次提交前原子落盘，重新打开真实来源URL核对，未知状态停止而非再次点击。
 
 ## 1. 工具地图（本线 9 个原子能力）
 
@@ -60,11 +65,24 @@ tags:
 ## 4. 点赞 / 收藏（幂等 + 状态校验）
 
 - 工具**先读** `interactInfo` 的 `liked` / `collected`，**已是目标态就跳过**（返回 `skipped:true`），不会重复点。
-- 点击后等 2.5s 再读状态校验；没成功会**自动再点一次兜底**。返回 `verified:true` 才算确认成功。
+- desktop重新进入笔记后读取真实选中图标，`verified:true`才确认成功。
+  图标动画可能让AXImage变化；出现不确定结果先只读核对，禁止重按。
+  新的主动互动循环使用新的`operation_id`；同一已完成操作若当前状态改变不会伪报仍成功。
+  当前CDP旧路径仍需连接后独立验收；不要把desktop通过称为CDP通过。
 - 取消操作：`xhs_like_feed(..., unlike=true)` / `xhs_favorite_feed(..., unfavorite=true)`。
 - 返回 `selector_hit:false` = 按钮没找到（页面改版/不在详情页）→ 见 §6 兜底。
 
 ## 5. 评论 / 回复
+
+- desktop支持`action=prepare/send/clear`，prepare不提交，clear先核对原全文；
+  send先绑定owner/note、落盘、单次发送，再重新打开详情查自己的相同正文评论。
+  必须点击实际“说点什么...”展开，再正常键盘输入；只赋AXValue不能使发送按钮生效。
+  自有私密测试评论单次发送及独立全文/作者核对已通过，不用“作者”徽标作正文。
+- desktop回复使用真实`user_id`与完整`target_content`复合定位，要求唯一目标；
+  先核对“回复 昵称”和引用原文，再单次发送。重开详情后核对目标原评论与
+  同一线程缩进回复容器中的owner/fulltext，不能把全评论列表中的同文当回复成功。
+  评论ID仍为null。自有测试顶层评论回复已实际通过，深层回复关系尚未验收。
+  `action=prepare/send/clear`区分预填、提交和清除原文，不因作者昵称相同而选择其他评论。
 
 - `xhs_post_comment`：点输入框 → 注入文本（contenteditable 用 execCommand）→ 点提交。
 - `xhs_reply_comment`：滚动评论区定位目标评论（优先 `comment_id`→`#comment-{id}`，否则按 `user_id`→`[data-user-id]`）→ 点该评论的回复按钮 → 输入 → 提交。`comment_id` / `user_id` 至少给一个，从 `xhs_get_feed_detail` 的 `comments[i].id` / `author_id` 取。
@@ -82,7 +100,7 @@ tags:
 ## 7. 可见性 / 风控限制
 
 - 笔记可能「已删除/私密/违规/仅作者可见」→ 工具返回 `blocked:true` + `reason`，直接跳过，别重试别兜底。
-- 互动节奏别太猛（参考项目实测日发 50 篇没事，但点赞/评论刷太快会触发验证）；批量操作时工具间留间隔。
+- 批量之前先完整核对一个目标。平台额度没有可靠实证，不将外部项目传言视为当前账号额度。
 - 拿不到 `__INITIAL_STATE__` 且重试无效，多半是风控弹窗 → 报告用户，不要硬刚。
 
 ## 8. 沉淀习惯
