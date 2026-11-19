@@ -1,31 +1,30 @@
 # 启动速查
 
-首次安装与模型配置见 [README](README.md#快速开始)；排障见[安装说明](docs/installation_zh.md)。
-
-macOS / Linux，在项目根目录：
+首次安装、模型配置、Chrome插件与macOS权限请按[README](README.md#快速开始)执行。
 
 ```bash
 source .venv/bin/activate
 python -m ga_cli studio
 ```
 
-Windows：
-
-```powershell
-.\.venv\Scripts\python.exe -m ga_cli studio
-```
-
-默认打开 <http://127.0.0.1:14168>，保持终端运行，`Ctrl+C` 停止。端口已占用时：
+默认地址<http://127.0.0.1:14168/>，保持终端运行，`Ctrl+C`停止。
 
 ```bash
-BRIDGE_PORT=14169 python -m ga_cli studio
+BRIDGE_PORT=14170 python -m ga_cli studio
+python -m ga_cli cli
+python -m operations.resident start --port 14170
 ```
 
-- 当前本地 Run 配置使用14169；命令本身默认14168。已有服务不会被自动终止。
-- 无需 Node.js。服务重启后刷新旧标签，让页面重新连接；未被服务接收的输入和素材会保留。
-- macOS 桌面操作需安装 `".[desktop]"`，授权辅助功能并保持 Chrome 登录。
-- CDP 通路需加载 `assets/tmwd_cdp_bridge/`；只开启9222不足以连接。
-- 文本终端：`python -m ga_cli cli`。
-- 自主模式：`python -m ga_cli autonomous`，会产生真实账号动作，需先完成对应授权和账号控制。
-- 发布默认 self；preview 只预填，save_draft 是写操作。后台队列默认暂停，结果未知只读核对。
-- 账号限制时停止写操作，保留任务与草稿。规则见[账号与测试控制](docs/NEW_ACCOUNT_TEST_CONTROL.md)。
+Windows使用`.venv\Scripts\python.exe`代替`python`。平台桌面操作以macOS为主要验收环境。
+CDP通路需要仓库自带Chrome桥接扩展，加载前先初始化Agent生成本机`config.js`。
+不要同时启动普通Studio与监督进程占用同一端口或数据库。
+
+编辑人设/规则后：
+
+```bash
+python -m automedia.configuration check
+python -m automedia.configuration apply
+```
+
+先只读核对登录与页面，再授权具体写操作。后台队列默认暂停，发布仅自己可见，
+未知提交先回读，不重新发送。`autonomous`命令会触发真实平台动作，不属于普通启动。

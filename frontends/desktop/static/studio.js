@@ -5,6 +5,7 @@
   const app = el('app');
   const titles = {
     scene: ['AUTOMEDIA / ON SET', '你的创作小片场', '来，开个好头。'],
+    operations: ['AUTOMEDIA / PERSONAL JOURNAL', '她的生活手记', '每一次观察，都留下一点变化。'],
     assets: ['AUTOMEDIA / MATERIAL DESK', '作品，摊开来看。', '每个版本都算数。'],
     ideas: ['AUTOMEDIA / IDEA PLAYGROUND', '好点子，从玩开始。', '给下一条找个开场。'],
     rhythm: ['AUTOMEDIA / RELEASE RHYTHM', '创作大胆，发布从容。', '一步一步，留住成果。'],
@@ -42,6 +43,7 @@
     el('studio-view-title').replaceChildren(document.createTextNode(titles[view][1]), sub);
     el('agent-live').scrollTop = 0;
     storage.write('view', view);
+    if (view === 'operations') el('setup-gate')?.classList.add('hidden');
     if (view === 'rhythm') refreshStudio();
   }
   document.querySelectorAll('[data-studio-nav]').forEach((button) => {
@@ -239,7 +241,7 @@
 
   function readinessLabel(available) {
     if (!available) return '尚未核对';
-    if (available.ok) return '额度可用 · 提交前仍会核对浏览器账号';
+    if (available.ok) return '发帖间隔已满足 · 提交前会核对浏览器账号';
     return available.reason || '当前写操作已暂停';
   }
   function renderRhythm(data) {
@@ -250,7 +252,8 @@
     const healthy = data?.ok === true && quota.available === true;
     const limits = test.limits || {};
     el('rhythm-status').textContent = data?.ok === false ? data.error || '状态读取失败，稍后重试。' : readinessLabel(test.publish_ready);
-    el('quota-count').textContent = healthy ? `${quota.remainingWrites} / ${limits.rolling_24h} 次剩余` : '等待状态核对';
+    el('quota-count').textContent = healthy ? limits.rolling_24h == null ?
+      `近24小时已记录 ${quota.usedWrites} 次操作` : `${quota.remainingWrites} / ${limits.rolling_24h} 次剩余` : '等待状态核对';
     const dots = [];
     if (healthy) for (let i = 0; i < limits.rolling_24h; i++) {
       const dot = document.createElement('span');
@@ -259,19 +262,20 @@
       dots.push(dot);
     }
     el('quota-dots').replaceChildren(...dots);
-    el('publish-quota').textContent = healthy ? `${quota.remainingPublishes} / ${limits.publish_24h} 次` : '—';
+    el('publish-quota').textContent = healthy ? limits.publish_24h == null ?
+      '不限次数' : `${quota.remainingPublishes} / ${limits.publish_24h} 次` : '—';
     el('rhythm-interval').textContent = limits.min_interval_seconds ? `${limits.min_interval_seconds / 60} 分钟` : '—';
     const ready = test.publish_ready;
-    el('rhythm-next').textContent = ready?.retry_after ? new Date(ready.retry_after).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ready?.ok ? '额度可用' : '核对账号后';
+    el('rhythm-next').textContent = ready?.retry_after ? new Date(ready.retry_after).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ready?.ok ? '现在可发' : '核对账号后';
     el('rhythm-account').textContent = binding?.nickname || '新测试账号未绑定';
     const platform = platformState?.platforms?.xiaohongshu;
     el('rhythm-account-detail').textContent = binding
       ? `账号 ID ${binding.owner_id}${platform?.state === 'restricted' ? '；当前平台页面有访问限制，请先核对登录身份。' : '；每次提交仍需核对主站与创作中心。'}`
       : '主站与创作中心需登录同一个健康账号，读取稳定 ID 后才能绑定。当前可继续策划和制作。';
-    el('rhythm-policy').textContent = test.message || '项目内部测试上限，不是平台公布的安全阈值。';
+    el('rhythm-policy').textContent = test.message || '两次发帖间隔约10分钟，不设每日次数上限。';
     const queue = data?.queue || {};
     el('studio-queue-count').textContent = queue.ok === false ? '—' : String(queue.total || 0);
-    el('queue-status').textContent = queue.ok === false ? '队列记录不可读，保留原文件并等待核对。' : test.background_paused ? '后台发布暂停 · 作品原样保留' : '后台按共享额度处理作品';
+    el('queue-status').textContent = queue.ok === false ? '队列记录不可读，保留原文件并等待核对。' : test.background_paused ? '后台发布暂停 · 作品原样保留' : '后台按发帖间隔处理作品';
     const rows = [];
     const states = { queued: '等待', running: '执行中 · 需核对', uncertain: '结果待核对', done: '完成', cancelled: '已取消', failed: '失败' };
     for (const item of queue.items || []) {
@@ -323,6 +327,6 @@
   setInterval(() => { if (!document.hidden && app.dataset.studioView === 'rhythm') refreshStudio(); }, 15000);
   updateWorkspace(currentWorkspace);
   updateActivity(null);
-  const savedView = storage.read('view', 'scene');
-  showView(titles[savedView] ? savedView : 'scene');
+  const savedView = new URLSearchParams(location.search).get('view') || 'operations';
+  showView(titles[savedView] ? savedView : 'operations');
 })();

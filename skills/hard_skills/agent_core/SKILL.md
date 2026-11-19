@@ -16,7 +16,8 @@ tags: [router, social_media, cross_platform]
 | 找信息、比较、总结、调研 | `research_mode` |
 | 策划选题/脚本/商业广告，或持续运营账号 | `operate_mode` |
 | 审图并形成可发布内容 | `xhs_review` |
-| 单独搜索/读取 | `xhs_search` |
+| 小红书单独搜索/读取 | `xhs_search` |
+| 抖音浏览、搜索、查看视频 | `douyin_browse` |
 | 单独点赞、收藏、评论、回复 | `xhs_interact` |
 | 已有素材与文案，直接发布 | `xhs_publish` |
 | 通知、自己作品、数据或账号管理 | `xhs_manage` |

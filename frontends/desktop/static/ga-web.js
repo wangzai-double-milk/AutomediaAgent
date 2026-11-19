@@ -84,7 +84,9 @@
       case 'get/model-profiles':
         return http('/model-profiles');
       case 'session/new':
-        return http('/session/new', { method: 'POST', body: params || {} });
+        return http('/session/new', { method: 'POST', body: {
+          ...(params || {}), account_id: params?.account_id || document.getElementById('ops-account')?.value || null
+        } });
       case 'session/prompt': {
         const sid = params.sessionId || params.id || params.bridgeSessionId;
         if (!sid) throw new Error('session/prompt missing sessionId');

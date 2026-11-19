@@ -88,6 +88,8 @@ class Session:
     thread: Optional[threading.Thread] = None
     cancel_requested: bool = False
     last_error: str = ""
+    account_id: Optional[str] = None
+    runtime_job_id: Optional[str] = None
 
 
 class AgentManager:
@@ -126,6 +128,9 @@ class AgentManager:
         agentmain = importlib.import_module("agentmain")
         GA = getattr(agentmain, "GenericAgent")
         agent = GA()
+        agent.account_id = sess.account_id
+        if sess.account_id:
+            agent.peer_hint = False
         agent.inc_out = True
         agent.verbose = True
         threading.Thread(target=agent.run, daemon=True, name=f"GA-{sess.id}").start()
@@ -153,6 +158,8 @@ class AgentManager:
             "updatedAt": sess.updated_at,
             "lastError": sess.last_error,
             "msgSeq": sess.msg_seq,
+            "accountId": sess.account_id,
+            "runtimeJobId": sess.runtime_job_id,
         }
         if include_messages:
             out["messages"] = list(sess.messages)
@@ -169,9 +176,12 @@ class AgentManager:
             sess.title = content.strip().replace("\n", " ")[:40]
         return msg
 
-    def create_session(self, cwd: Optional[str] = None) -> Session:
+    def create_session(self, cwd: Optional[str] = None, account_id: Optional[str] = None) -> Session:
+        if account_id:
+            from operations.runtime import RuntimeStore
+            RuntimeStore().account(account_id)
         sid = "sess-" + uuid.uuid4().hex[:12]
-        sess = Session(id=sid, cwd=str(cwd or self.ga_root))
+        sess = Session(id=sid, cwd=str(cwd or self.ga_root), account_id=account_id)
         with self.lock:
             self.sessions[sid] = sess
             self.active_session_id = sid
@@ -319,6 +329,7 @@ class AgentManager:
             full = ""
             if hasattr(agent, "put_task"):
                 display_q = agent.put_task(prompt, images=images or [])
+                sess.runtime_job_id = getattr(display_q, "runtime_job_id", None)
                 pieces = []
                 import queue as _queue
                 while True:
@@ -1332,7 +1343,13 @@ async def list_sessions_handler(request):
 
 async def new_session_handler(request):
     data = await read_json(request)
-    sess = manager.create_session(cwd=data.get("cwd") or data.get("path"))
+    try:
+        sess = manager.create_session(cwd=data.get("cwd") or data.get("path"), account_id=data.get("account_id"))
+    except Exception as exc:
+        from operations.store import DomainError
+        if isinstance(exc, DomainError):
+            return json_ok({"error": str(exc)}, status=exc.status)
+        raise
     return json_ok({"ok": True, "sessionId": sess.id, "session": manager.snapshot(sess)}, status=201)
 
 
@@ -1497,8 +1514,10 @@ def studio_state():
         used_publishes = sum(entry["kind"] == "publish" for entry in recent)
         quota = {
             "available": True, "usedWrites": used_writes, "usedPublishes": used_publishes,
-            "remainingWrites": max(0, control["limits"]["rolling_24h"] - used_writes),
-            "remainingPublishes": max(0, control["limits"]["publish_24h"] - used_publishes),
+            "remainingWrites": (max(0, control["limits"]["rolling_24h"] - used_writes)
+                                if control["limits"]["rolling_24h"] is not None else None),
+            "remainingPublishes": (max(0, control["limits"]["publish_24h"] - used_publishes)
+                                   if control["limits"]["publish_24h"] is not None else None),
         }
     path = Path(task.TASKS_ROOT) / "content_queue.json"
     try:
@@ -1593,6 +1612,8 @@ def create_app():
     app.router.add_get("/studio/state", studio_state_handler)
     app.router.add_post("/platform/open", platform_open_handler)
     app.router.add_post("/path/open", path_open_handler)
+    from operations.api import install as install_operations
+    install_operations(app, DEFAULT_GA_ROOT)
 
     # Serve static frontend (desktop/static/)
     static_dir = APP_DIR / "desktop" / "static"

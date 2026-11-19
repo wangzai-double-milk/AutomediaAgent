@@ -1523,8 +1523,8 @@ function renderMessages() {
     messagesEl.classList.add('empty');
     messagesEl.innerHTML = `
       <div class="empty-state">
-        <div class="empty-kicker">导演，请说</div>
-        <div class="empty-title">今天，开拍什么？</div>
+        <div class="empty-kicker">AutoMedia</div>
+        <div class="empty-title">今天想推进什么？</div>
         <div class="empty-sub">给个目标，看它搜索、拆解，再把想法变成作品。</div>
         <div class="starter-grid">
           <button class="starter-card" data-prompt="调研小红书和抖音最近的内容趋势，持续看到没有新知识为止"><span class="starter-icon">↗</span><strong>找近期趋势</strong><small>看看大家最近都在聊什么</small></button>

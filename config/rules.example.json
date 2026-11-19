@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "publishing": {"interval_seconds": 600, "visibility": "self"},
+  "thinking": {"guidance": "", "max_revisions": 2},
+  "talk": {"guidance": ""},
+  "models": {
+    "thinking": {"connection": "native_oai_config", "model": ""},
+    "talk": {"connection": "native_oai_config", "model": ""},
+    "behavior": {"connection": "native_oai_config", "model": ""}
+  }
+}

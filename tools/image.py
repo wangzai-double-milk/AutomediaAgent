@@ -190,7 +190,9 @@ def _http_post_json(url: str, payload: dict, timeout: int = 180) -> dict:
         method='POST',
     )
     try:
-        resp = urllib.request.urlopen(req, timeout=timeout).read().decode('utf-8')
+        from operations.broker import model_slot
+        with model_slot():
+            resp = urllib.request.urlopen(req, timeout=timeout).read().decode('utf-8')
     except urllib.error.HTTPError as e:
         body = e.read().decode('utf-8', errors='replace')
         log.error('POST %s 失败 HTTP %s (%.1fs): %s', url, e.code, time.time() - _t0, body[:500])
@@ -437,6 +439,7 @@ def download_video_to_temp(video_url: str, suffix: str = '.mp4', max_bytes: int 
     try:
         with urllib.request.urlopen(_video_request(video_url), timeout=120) as resp, open(path, 'wb') as f:
             ct = (resp.headers.get('Content-Type') or '').lower()
+            expected_length = resp.headers.get('Content-Length')
             if 'text/html' in ct:
                 raise RuntimeError(f'下载到 HTML 而不是视频: content-type={ct}')
             while True:
@@ -447,6 +450,8 @@ def download_video_to_temp(video_url: str, suffix: str = '.mp4', max_bytes: int 
                 if total > max_bytes:
                     raise RuntimeError(f'视频超过下载上限 {max_bytes} bytes')
                 f.write(chunk)
+            if expected_length and total != int(expected_length):
+                raise RuntimeError('视频下载长度与Content-Length不一致')
         if total <= 0:
             raise RuntimeError('下载视频为空')
         log.info('已下载视频到临时文件: %s (%.1fMB)', path, total / 1024 / 1024)
@@ -780,15 +785,17 @@ def _http_post_multipart(url: str, fields: dict, file_field: str = None,
             file_handle = open(file_path, 'rb')
             multipart_fields[file_field] = (fname, file_handle, mime)
         encoder = MultipartEncoder(fields=multipart_fields)
-        resp = requests.post(
-            url,
-            headers={
-                'Authorization': f'Bearer {API_KEY}',
-                'Content-Type': encoder.content_type,
-            },
-            data=encoder,
-            timeout=timeout,
-        )
+        from operations.broker import model_slot
+        with model_slot():
+            resp = requests.post(
+                url,
+                headers={
+                    'Authorization': f'Bearer {API_KEY}',
+                    'Content-Type': encoder.content_type,
+                },
+                data=encoder,
+                timeout=timeout,
+            )
         if not resp.ok:
             log.error('POST(multipart) %s 失败 HTTP %s (%.1fs): %s',
                       url, resp.status_code, time.time() - _t0, resp.text[:500])
@@ -905,7 +912,7 @@ def upload_video_for_understanding(video: str, fps: float = None,
     return file_id
 
 
-def _prepare_one_video(v: str):
+def _prepare_one_video(v: str, fallback_url=None):
     """把单条视频准备成可供模型引用的 file_id（或降级 video_url）。
     线程安全：只用局部变量 + 各自的网络请求，供并发上传调用。
     返回 dict：{file_id, video_url, uploaded_fid, temp_file, error}
@@ -930,6 +937,17 @@ def _prepare_one_video(v: str):
         log.info('视频已上传 Files API，整段理解 file_id=%s', file_id)
         return out
     except Exception as e:
+        quota = any(s in str(e).lower() for s in ("quotaexceeded", "storage quota", "storage limit", "quota exceeded"))
+        if fallback_url and not _is_video_page_url(fallback_url) and _is_direct_video_url(fallback_url):
+            out['video_url'] = fallback_url
+            return out
+        if quota:
+            # A second upload cannot solve a full provider quota. Never delete unrelated files.
+            if isinstance(v, str) and v.startswith('https://') and _is_direct_video_url(v):
+                out['video_url'] = v
+            else:
+                out['error'] = 'Files API存储额度已满；本地输入无已验证的直链降级来源'
+            return out
         log.warning('Files API 上传视频失败，尝试本地下载后重新上传: %s', e)
         try:
             if isinstance(v, str) and v.startswith(('http://', 'https://')) and _is_direct_video_url(v):
@@ -971,7 +989,8 @@ def _is_video_media(media: str) -> bool:
     return mime.startswith('video/')
 
 
-def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
+def analyze_image(images: typing.Union[str, list], prompt: str, *, video_fallbacks=None,
+                  evidence_callback=None) -> str:
     """通用图片/视频分析：将一张或多张图片、视频和自定义 Prompt 喂给 VLM，返回分析结果。
     视频走 Files API 上传整段（最大 512MB，按 VIDEO_SAMPLE_FPS 抽帧理解全片），
     而非只看几张关键帧——这样模型能真正"看完整段视频"。
@@ -1006,7 +1025,10 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
         max_workers = max(1, min(_VIDEO_UPLOAD_CONCURRENCY, len(raw_vids)))
         results = [None] * len(raw_vids)
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            future_to_idx = {ex.submit(_prepare_one_video, v): i for i, v in enumerate(raw_vids)}
+            future_to_idx = {
+                (ex.submit(_prepare_one_video, v, video_fallbacks[v])
+                 if video_fallbacks and v in video_fallbacks else ex.submit(_prepare_one_video, v)): i
+                for i, v in enumerate(raw_vids)}
             for fut in as_completed(future_to_idx):
                 idx = future_to_idx[fut]
                 try:
@@ -1058,6 +1080,10 @@ def analyze_image(images: typing.Union[str, list], prompt: str) -> str:
     # 视频整片理解单次推理很慢，给足超时；纯图片走默认超时即可。
     req_timeout = VIDEO_UNDERSTAND_TIMEOUT if has_video else 180
     try:
+        if evidence_callback:
+            evidence_callback({"input_transport": [
+                "uploaded_file" if str(v).startswith("file-") else "observed_url" for v in vids_list],
+                "sample_fps": VIDEO_SAMPLE_FPS if all(str(v).startswith("file-") for v in vids_list) else None})
         data = _http_post_json(RESPONSES_URL, payload, timeout=req_timeout)
     except RuntimeError as e:
         return f"[Error] API 请求失败: {e}"

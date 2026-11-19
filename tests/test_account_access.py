@@ -5,11 +5,11 @@ import pytest
 
 from tools import xhs_account as account, xhs_library, xhs_messages, xhs_publish
 
-OWNER = "691d398c000000003702f111"
+OWNER = "aaaaaaaaaaaaaaaaaaaa0001"
 
 
 def profile(owner=OWNER, risk=True, own=OWNER):
-    labels = ["小红书号：42080869580",
+    labels = ["小红书号：10000000000",
               "该账号疑似存在风险，暂时无法查看笔记。" if risk else "笔记"]
     return {"page_url": "https://www.xiaohongshu.com/user/profile/" + owner,
             "web": [{"role": "AXLink", "title": "我",

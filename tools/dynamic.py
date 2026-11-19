@@ -9,7 +9,7 @@ import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS_DIR = os.path.join(PROJECT_ROOT, "tools")
-RESERVED_PREFIXES = ("web_", "xhs_")
+RESERVED_PREFIXES = ("web_", "xhs_", "douyin_")
 
 
 class DynamicToolManager:

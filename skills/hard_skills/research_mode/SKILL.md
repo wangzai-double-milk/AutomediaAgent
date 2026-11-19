@@ -23,6 +23,7 @@ tags: [workflow, research, cross_platform]
 ## 跨平台执行
 
 - 小红书：`xhs_search` capability。
+- 抖音：`douyin_browse` capability；视频理解仍用 `analyze_media`，成功后记录研究增量。
 - 未提供专用能力的平台：`explore_mode` + `perception_action`。
 - 需要渠道建议：`search_anywhere`。
 

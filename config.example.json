@@ -1,6 +1,6 @@
 {
   "_README": "首次复制为 config.json，填入自己的 API Key；模型 ID 必须在自己的方舟账号中可用。示例 ID 不保证已开通，请按账号权限替换。不要提交 config.json。",
-  "volc_apikey": "ark-在这里填入你的火山引擎APIKey",
+  "volc_apikey": "",
   "volc_apibase": "https://ark.cn-beijing.volces.com/api/v3",
   "models": {
     "llm": "doubao-seed-2-0-pro-260215",

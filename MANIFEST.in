@@ -1,15 +1,17 @@
-include config.example.json .env.example HOW_TO_RUN.md
+include config.example.json .env.example HOW_TO_RUN.md CONTRIBUTING.md
 recursive-include scripts *.py
+recursive-include assets/readme *.svg *.png
 include docs/installation_zh.md docs/CAPABILITY_MATRIX.md
-include docs/NEW_ACCOUNT_TEST_CONTROL.md docs/EXECUTION_PRESENTATION.md
-include docs/DOCUMENTATION_MAP.md docs/OPEN_SOURCE_DISCOVERABILITY.md
-include docs/PROJECT_SOURCES.md docs/RELEASE_VALIDATION.md
-include docs/FRONTEND_STUDIO_DESKTOP.png docs/FRONTEND_STUDIO_IDEAS.png
-include docs/EXECUTION_FEED_DESKTOP.png docs/EXECUTION_FEED_DETAIL.png
-include docs/SOCIAL_PREVIEW.png
+include docs/PROJECT_STRUCTURE.md docs/NEW_ACCOUNT_TEST_CONTROL.md
+include docs/DOUYIN_INTEGRATION.md docs/DOUYIN_UPSTREAM_LICENSE.txt docs/PROJECT_SOURCES.md
+include config/*.example.json
 prune skills/local
 prune docs/_local
 prune .trae
 prune tasks
 prune memory
-exclude config.json .env mykey.json auth.json
+prune settings
+prune logs
+prune temp
+global-exclude __pycache__ *.pyc *.pyo .DS_Store
+exclude config.json .env mykey.json auth.json USER_REQUIREMENTS.md

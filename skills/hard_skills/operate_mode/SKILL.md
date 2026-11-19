@@ -23,6 +23,7 @@ tags: [workflow, operate, cross_platform]
 
 ## 平台选择
 
+抖音调研/学习使用 `douyin_browse`，与现有视频理解和研究记忆衔接；此能力没有互动或发布入口。
 主工作流不绑定平台。每个平台使用自己的 capability；没有 capability 时用
 `explore_mode` 完成当前动作，不在本工作流内描述页面操作细节。
 

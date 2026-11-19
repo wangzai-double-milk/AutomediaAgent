@@ -8,6 +8,7 @@
     "resource_can_depend_on": []
   },
   "tool_skill_gates": {
+    "douyin_browse": "douyin_browse",
     "web_visual_click": "perception_action",
     "web_visual_fill": "perception_action",
     "web_learn_page": "perception_action",
@@ -32,6 +33,7 @@
     "xhs_collections": "xhs_manage",
     "xhs_rss": "xhs_manage",
     "xhs_prepare_note": "xhs_publish",
+    "xhs_publish_content": "xhs_publish",
     "xhs_publish_video": "xhs_publish",
     "xhs_publish_longform": "xhs_publish",
     "xhs_publish_podcast": "xhs_publish",
@@ -47,19 +49,19 @@
       "layer": "router",
       "path": "hard_skills/agent_core/SKILL.md",
       "routable": true,
-      "depends_on": ["research_mode", "operate_mode", "xhs_review", "xhs_search", "xhs_interact", "xhs_publish", "xhs_manage", "explore_mode"]
+      "depends_on": ["research_mode", "operate_mode", "xhs_review", "xhs_search", "douyin_browse", "xhs_interact", "xhs_publish", "xhs_manage", "explore_mode"]
     },
     "research_mode": {
       "layer": "workflow",
       "path": "hard_skills/research_mode/SKILL.md",
       "routable": false,
-      "depends_on": ["xhs_search", "xhs_interact", "explore_mode", "perception_action", "search_anywhere"]
+      "depends_on": ["xhs_search", "douyin_browse", "xhs_interact", "explore_mode", "perception_action", "search_anywhere"]
     },
     "operate_mode": {
       "layer": "workflow",
       "path": "hard_skills/operate_mode/SKILL.md",
       "routable": false,
-      "depends_on": ["xhs_search", "xhs_interact", "xhs_edit", "xhs_publish", "xhs_manage", "explore_mode", "perception_action", "search_anywhere", "commercial_ad_production", "git_content_creation", "personal_operating_method"]
+      "depends_on": ["xhs_search", "douyin_browse", "xhs_interact", "xhs_edit", "xhs_publish", "xhs_manage", "explore_mode", "perception_action", "search_anywhere", "commercial_ad_production", "git_content_creation", "personal_operating_method"]
     },
     "xhs_review": {
       "layer": "workflow",
@@ -82,6 +84,12 @@
     "xhs_search": {
       "layer": "capability",
       "path": "hard_skills/xhs_search/SKILL.md",
+      "routable": false,
+      "depends_on": []
+    },
+    "douyin_browse": {
+      "layer": "capability",
+      "path": "hard_skills/douyin_browse/SKILL.md",
       "routable": false,
       "depends_on": []
     },

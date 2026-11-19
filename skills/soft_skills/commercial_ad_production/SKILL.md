@@ -11,19 +11,8 @@ tags:
 
 ## Evidence
 
-- {'platform': 'xiaohongshu', 'item_id': '68b7e04d000000001d0069c5', 'title': '一条TVC是如何诞生的', 'status': '已深度阅读+图片OCR'}
-- {'platform': 'xiaohongshu', 'item_id': '69ce54be000000002300654b', 'title': '信息流和TVC的拍法完全不同，新人必看', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '68f89ecd000000000301b17f', 'title': '好脚本自己会说话：资深编剧的TVC爆款心法', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '6a2c3932000000001702ce91', 'title': '给导演看的TVC脚本直接抄！（附模板）', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '6a001c3e000000000800025f', 'title': '硬广视频怎么拍', 'status': '已深度阅读+图片OCR'}
-- {'platform': 'xiaohongshu', 'item_id': '66f02c43000000000c018adb', 'title': '助理实拍VS摄影师（摄影内训资料含灯位图）', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '66f3e360000000002c02eb2c', 'title': '手机也能拍出商业产品图｜小白产品摄影分享', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '6866c2f80000000022033269', 'title': '初次跟片，做好这几点很重要‼️', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '69133e0a0000000003037f66', 'title': '莲花跑车｜广告导演Treatment方案分享', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '696ca29d000000001a01c4b9', 'title': '🔥3小时手搓｜完全用AI生成的产品广告教程', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '6a17f14a000000000803ca62', 'title': '三步完成产品TVC广告，全流程方法论分享', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '6a0fc0ee000000003501c892', 'title': '广告布光思路：如何让打光隐形且高级', 'status': '已深度阅读'}
-- {'platform': 'xiaohongshu', 'item_id': '67d9870b000000001c00a735', 'title': '五个拍摄技巧|试着教会你拍产品Broll', 'status': '已深度阅读'}
+方法来自公开商业摄影资料的整理。具体阅读记录保存在本机任务中，不随公开Skill分发；
+使用时根据实际产品、参考素材与任务证据重新核对适用性。
 
 # 商业广告拍摄全流程 SOP
 

@@ -1,4 +1,5 @@
 temp/
+/settings/
 tmp/
 
 __pycache__/
@@ -92,9 +93,16 @@ reflect/*
 /docs/REBUILD_DECISIONS.md
 /docs/UPSTREAM_RESEARCH.md
 /automedia-project-overview/
+/automedia-architecture/
 .pytest_cache/
 .screenshots/
 /.trae/
+!/.trae/
+/.trae/*
+!/.trae/skills/
+/.trae-html-share-packages/
+/AutoMedia_*汇报*.md
+/小红书_*SOP*.md
 # Additional local UI verification captures; public README assets are explicit.
 /docs/EXECUTION_FEED_MOBILE.png
 /docs/FRONTEND_STUDIO_MOBILE.png

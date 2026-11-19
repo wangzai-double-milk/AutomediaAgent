@@ -35,6 +35,9 @@ jobs:
               "llmcore.py",
               "mykey.py",
               "TMWebDriver.py",
+              "automedia/thinking/engine.py",
+              "automedia/infrastructure/browser/mac_browser.py",
+              "config/rules.example.json",
               "ga_cli/__main__.py",
               "ga_cli/cli.py",
               "tools/convergence.py",
@@ -58,7 +61,8 @@ jobs:
               raise SystemExit(f"wheel missing required files: {missing}")
           forbidden = {"config.json", "config.js", ".env", "auth.json", "mykey.json",
                        "USER_REQUIREMENTS.md", "ACCOUNT_RESTRICTION.md",
-                       "CONTINUATION.md", "DELIVERY.md", "_local", "tasks", "memory"}
+                       "CONTINUATION.md", "DELIVERY.md", "_local", "tasks", "memory",
+                       "settings", "logs", "temp"}
           leaked = sorted(name for name in names if forbidden.intersection(name.split("/")))
           if leaked:
               raise SystemExit(f"wheel contains local files: {leaked}")

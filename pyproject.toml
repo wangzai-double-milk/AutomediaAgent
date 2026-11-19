@@ -22,6 +22,8 @@ dependencies = [
 dev = [
     "build>=1.2",
     "pytest>=8.0",
+    "Pillow>=10",
+    "imageio-ffmpeg>=0.5",
 ]
 media = [
     "moviepy>=1.0.3",
@@ -52,21 +54,27 @@ include-package-data = false
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
+    "automedia",
+    "automedia.*",
+    "config",
     "ga_cli*",
     "tools*",
     "assets*",
     "skills*",
     "frontends*",
     "reflect*",
+    "operations*",
     "docs",
 ]
 exclude = ["skills.local*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"tools" = ["*/tool.json"]
+"config" = ["*.example.json"]
+"tools" = ["*/tool.json", "douyin_dom.js"]
 "skills" = ["registry.json", "ARCHITECTURE.md"]
 "assets" = ["*.json", "*.txt"]
+"assets.readme" = ["*.svg", "*.png"]
 "assets.tmwd_cdp_bridge" = ["*.json", "*.js", "*.html"]
 "frontends.desktop.static" = ["*.html", "*.css", "*.js"]
 "frontends.desktop.static.vendor" = ["*.js"]
@@ -80,6 +88,7 @@ namespaces = true
 "skills.hard_skills.xhs_manage" = ["*.md"]
 "skills.hard_skills.xhs_review" = ["*.md"]
 "skills.hard_skills.xhs_search" = ["*.md"]
+"skills.hard_skills.douyin_browse" = ["*.md"]
 "skills.soft_skills.git_content_creation" = ["*.md"]
 "skills.soft_skills.commercial_ad_production" = ["*.md"]
 "skills.soft_skills.search_anywhere" = ["*.md"]
@@ -87,19 +96,13 @@ namespaces = true
 "skills.soft_skills.xhs_review_prompt" = ["*.md"]
 "skills.soft_skills.personal_operating_method" = ["*.md"]
 "docs" = [
+    "PROJECT_STRUCTURE.md",
+    "DOUYIN_INTEGRATION.md",
+    "DOUYIN_UPSTREAM_LICENSE.txt",
     "installation_zh.md",
     "CAPABILITY_MATRIX.md",
     "NEW_ACCOUNT_TEST_CONTROL.md",
-    "EXECUTION_PRESENTATION.md",
-    "DOCUMENTATION_MAP.md",
-    "OPEN_SOURCE_DISCOVERABILITY.md",
     "PROJECT_SOURCES.md",
-    "RELEASE_VALIDATION.md",
-    "FRONTEND_STUDIO_DESKTOP.png",
-    "FRONTEND_STUDIO_IDEAS.png",
-    "EXECUTION_FEED_DESKTOP.png",
-    "EXECUTION_FEED_DETAIL.png",
-    "SOCIAL_PREVIEW.png",
 ]
 
 [tool.setuptools.exclude-package-data]

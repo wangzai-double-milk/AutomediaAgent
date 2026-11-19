@@ -7,14 +7,16 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="studio.css?v=playful-1">
   <link rel="stylesheet" href="execution-feed.css?v=2">
+  <link rel="stylesheet" href="operations.css">
+  <link rel="stylesheet" href="journal.css">
 </head>
 <body>
-  <div id="app" data-studio-view="scene">
+  <div id="app" data-studio-view="operations">
       <header id="topbar">
         <div class="brand-mark"><span>AM</span></div>
         <div class="brand-copy">
           <strong>AutoMedia</strong>
-          <small>把想法拍成作品</small>
+          <small>持续观察，认真跟进</small>
         </div>
         <button id="setup-entry" class="setup-entry" type="button" title="检查平台登录状态">
           <i></i><span>平台</span>
@@ -34,17 +36,17 @@
 
     <nav class="studio-nav" aria-label="创作工作区">
       <span class="nav-caption">工作区</span>
-      <button type="button" data-studio-nav="scene" aria-current="page"><span>⌂</span>小片场</button>
+      <button type="button" data-studio-nav="operations" aria-current="page"><span>◎</span>生活手记</button>
       <button type="button" data-studio-nav="assets"><span>▧</span>素材桌<b id="studio-asset-count">0</b></button>
       <button type="button" data-studio-nav="ideas"><span>✦</span>灵感</button>
       <button type="button" data-studio-nav="rhythm"><span>◷</span>发布节奏</button>
-      <div class="nav-foot"><span class="nav-flower">✳</span><small>慢慢发布<br>大胆创作</small></div>
+      <button type="button" data-studio-nav="scene"><span>⌂</span>小片场</button>
     </nav>
 
     <aside id="main" class="mission-dock" aria-label="任务对话">
       <div id="chat-resizer" role="separator" tabindex="0" aria-label="调整对话高度，上下方向键调整" aria-orientation="horizontal" aria-valuemin="180" aria-valuemax="650" aria-valuenow="240"></div>
       <div class="chat-heading">
-        <strong><i></i>对话舱</strong><span>想法从这里开拍</span>
+        <strong><i></i>对话</strong><span>补充信息，或交代一件事</span>
         <button id="chat-search" type="button" aria-label="搜索对话">搜索</button>
         <button id="chat-toggle" type="button" aria-expanded="false">展开对话 ↗</button>
       </div>
@@ -58,8 +60,8 @@
 
       <section id="messages" class="empty">
         <div class="empty-state">
-          <div class="empty-kicker">导演，请说</div>
-          <div class="empty-title">今天，开拍什么？</div>
+          <div class="empty-kicker">AutoMedia</div>
+          <div class="empty-title">今天想推进什么？</div>
           <div class="empty-sub">给个目标，看它搜索、拆解，再把想法变成作品。</div>
           <div class="starter-grid">
             <button class="starter-card" data-prompt="调研小红书和抖音最近的内容趋势，持续看到没有新知识为止">
@@ -80,7 +82,7 @@
         <div id="composer">
           <div id="image-previews" class="image-previews"></div>
           <input id="media-input" type="file" accept="image/*,video/mp4,video/quicktime,video/webm" multiple hidden>
-          <textarea id="input" rows="1" aria-label="给 Agent 的任务" placeholder="说个想法，或者去上面抽一张灵感…"></textarea>
+          <textarea id="input" rows="1" aria-label="给 Agent 的任务" placeholder="交代任务，或补充你的想法…"></textarea>
           <div class="composer-bottom">
             <div class="composer-hints">
               <button id="attach-btn" class="icon-btn ghost" title="上传图片或视频" aria-label="上传图片或视频">＋<span class="hint-label">素材</span></button>
@@ -110,6 +112,226 @@
           <span id="live-state" class="live-state idle"><i></i><span>待命中</span></span>
         </div>
       </header>
+
+      <section id="operations-panel" data-studio-panel="operations" hidden aria-label="账号运营工作台">
+        <section class="journal-hero" aria-label="角色与生活手记">
+          <div class="journal-cover">
+            <div class="journal-cover-top"><span>CHARACTER STUDY</span><span id="journal-edition">01</span></div>
+            <div class="journal-letter" aria-hidden="true">她<span>的<br>手<br>记</span></div>
+            <p>有自己的想法。<br>也愿意认真听你说。</p>
+            <button class="journal-cover-link" id="journal-character-open" type="button">翻开人物档案 ↗</button>
+          </div>
+          <div class="journal-intro">
+            <span class="journal-eyebrow">A LITTLE WORLD, GROWING EVERY DAY</span>
+            <h3>从容一点，<br>让日常有点意思。</h3>
+            <p id="journal-persona">正在读取她的角色档案…</p>
+            <div class="journal-tags" id="journal-tags"></div>
+            <div class="journal-pulse"><i></i><span id="journal-now">正在查看近况</span></div>
+            <div class="journal-actions">
+              <button class="btn primary" type="button" id="journal-goal">交给她一件事 ↗</button>
+              <button class="btn" type="button" id="journal-letter">留一句话</button>
+              <button class="btn" type="button" id="journal-appearance">打开形象册</button>
+            </div>
+          </div>
+        </section>
+        <section class="journal-shelf" aria-label="创作灵感">
+          <div><span class="journal-eyebrow">灵感书签</span><strong id="journal-idea-title">温柔，也可以有边界</strong>
+            <p id="journal-idea-text">把一句不好意思说出口的话，换一种得体的表达。</p></div>
+          <div class="journal-actions"><button class="btn" type="button" id="journal-shuffle">换一枚 ↻</button>
+            <button class="btn" type="button" id="journal-use">带入对话 ↗</button></div>
+        </section>
+        <section id="journal-recent" aria-label="最近手记">
+          <div class="ops-section-head"><div><span class="journal-eyebrow">RECENT PAGES</span><h3>最近翻过的几页</h3></div>
+            <div class="journal-filters" role="group" aria-label="手记筛选">
+              <button type="button" data-journal-filter="all" aria-pressed="true">全部</button>
+              <button type="button" data-journal-filter="runtime" aria-pressed="false">任务手记</button>
+              <button type="button" data-journal-filter="archive" aria-pressed="false">历史足迹</button>
+            </div></div>
+          <p id="journal-state" role="status">正在整理真实记录…</p>
+          <div id="journal-pages"></div>
+          <button type="button" class="btn" id="journal-more" hidden>再翻几页 ↓</button>
+        </section>
+        <dialog id="journal-dialog" aria-labelledby="journal-dialog-title">
+          <div class="journal-dialog-head"><h3 id="journal-dialog-title">手记</h3><button class="btn" type="button" id="journal-close">关闭</button></div>
+          <div id="journal-dialog-body"></div>
+        </dialog>
+        <details id="journal-album" class="journal-album">
+          <summary>形象册 <span id="journal-album-state">读取中</span></summary>
+          <p>基础参考与场景版本一起保存。生成成功后，新任务会使用新外貌版本。</p>
+          <div id="journal-portraits"></div>
+          <button class="btn" id="journal-generate" type="button">按当前人设生成新形象</button>
+          <p id="journal-generation-message" role="status"></p>
+        </details>
+        <section id="mind-panel" aria-label="持续目标">
+          <div class="ops-section-head"><h3>正在关注</h3><span id="mind-status" role="status">读取中</span></div>
+          <div id="mind-goals"></div>
+          <details class="ops-details" id="mind-compose">
+            <summary>交给她一个持续目标</summary>
+            <form id="mind-form">
+              <label for="mind-objective">希望推进什么？</label>
+              <textarea id="mind-objective" required maxlength="12000" rows="3" placeholder="描述目标与现有材料；她会自行安排下一步，并根据结果复盘。"></textarea>
+              <label for="mind-criteria">做到什么算完成？</label>
+              <textarea id="mind-criteria" required maxlength="4000" rows="2" placeholder="例如：产出一份有出处的比较，标清未验证内容。"></textarea>
+              <label class="ops-check"><input type="checkbox" id="mind-douyin">允许为这个目标浏览抖音（只读）</label>
+              <p class="ops-scope">默认可整理、写作和翻译。使用下方所选档案；平台发送仍受原有授权约束。</p>
+              <button class="btn primary" type="submit">开始跟进</button>
+            </form>
+          </details>
+        </section>
+        <section class="runtime-section" aria-label="统一角色与三域运行">
+          <details class="ops-details" id="journal-character">
+            <summary>统一角色 · <span id="rt-character-version">读取中</span></summary>
+            <p class="ops-scope">她的共同身份。保存外貌方向后，可到形象册直接生成；声音样本仍可单独设定。</p>
+            <form id="rt-character-form">
+              <label for="rt-persona">共同人设</label><textarea id="rt-persona" rows="3" maxlength="8000" placeholder="身份、性格、价值观；真实经历与虚构设定请区分"></textarea>
+              <div class="ops-fields">
+                <div><label for="rt-appearance">外貌</label><textarea id="rt-appearance" maxlength="4000" placeholder="尚未设定"></textarea>
+                  <label for="rt-appearance-path">参考图片本地路径</label><input id="rt-appearance-path" maxlength="2000">
+                  <label for="rt-appearance-source">图片来源与使用范围</label><input id="rt-appearance-source" maxlength="2000"></div>
+                <div><label for="rt-voice">声音</label><textarea id="rt-voice" maxlength="4000" placeholder="尚未设定"></textarea>
+                  <label for="rt-voice-path">声音样本本地路径</label><input id="rt-voice-path" maxlength="2000">
+                  <label for="rt-voice-source">声音来源与使用范围</label><input id="rt-voice-source" maxlength="2000"></div>
+              </div>
+              <div class="ops-form-foot"><button class="btn" id="rt-character-reload" type="button">读取最新角色</button>
+                <button class="btn primary" type="submit">保存共同角色</button></div>
+            </form>
+          </details>
+          <details class="ops-details"><summary>安排一次研究、写作或翻译</summary>
+          <form id="rt-job-form">
+            <label for="rt-kind">任务类型</label><select id="rt-kind"><option value="douyin_research">抖音只读研究 → 有依据的总结</option><option value="draft">本地文案 / 翻译 → 独立核对</option></select>
+            <label for="rt-objective">这次希望它完成什么？</label><textarea id="rt-objective" rows="2" maxlength="2000" required placeholder="例如：搜索AI工具，读两条真实视频，再总结可参考的表达方式"></textarea>
+            <p class="ops-scope">使用下方选中的账号档案和统一角色。研究由项目Agent执行；表达保留为本地草稿。微信、QQ尚未接入。</p>
+            <button class="btn primary" type="submit">开始任务 ↗</button>
+          </form>
+          </details>
+          <p id="rt-message" role="status" aria-live="polite"></p>
+          <details class="ops-details runtime-section" id="content-panel">
+            <summary>内容母稿与发布</summary>
+            <p id="content-status" class="ops-scope"></p>
+            <details class="ops-details" id="content-create"><summary>准备新母稿</summary>
+            <form id="content-form" class="mind-signal">
+              <label for="content-objective">这篇内容要表达什么？</label>
+              <textarea id="content-objective" required maxlength="8000" rows="2"></textarea>
+              <label for="content-images">图片绝对路径（每行一张，按发布顺序）</label>
+              <textarea id="content-images" required rows="3"></textarea>
+              <label for="content-source">图片来源与使用说明</label>
+              <textarea id="content-source" required maxlength="4000" rows="2"></textarea>
+              <label for="content-facts">可使用的事实材料</label>
+              <textarea id="content-facts" required maxlength="6000" rows="3"></textarea>
+              <label for="content-reference">事实材料来源</label>
+              <input id="content-reference" required maxlength="2000">
+              <p class="ops-scope">沿用选中的账号档案和共同角色。先形成母稿并独立核对图片与文案；发布始终仅自己可见。</p>
+              <button type="submit" class="btn">准备母稿</button>
+            </form>
+            </details>
+            <p id="content-notice" role="status" aria-live="polite"></p>
+            <div id="content-list"></div>
+          </details>
+          <details class="ops-details runtime-section" id="messages-panel">
+            <summary>消息与跟进</summary>
+            <p id="msg-status" class="ops-scope">读取消息状态</p>
+            <details class="ops-details" id="msg-contact-create">
+              <summary>添加本地联系人备注</summary>
+              <form id="msg-contact-form" class="mind-signal">
+                <label for="msg-platform">平台</label>
+                <select id="msg-platform"><option value="wechat">微信</option><option value="qq">QQ</option></select>
+                <label for="msg-label">备注名称</label><input id="msg-label" required maxlength="200">
+                <label for="msg-owner">己方稳定标识</label><input id="msg-owner" required maxlength="200">
+                <label for="msg-peer">对方稳定标识</label><input id="msg-peer" required maxlength="200">
+                <p class="ops-scope">备注保存在本机。平台接入后仍需核验双方身份。</p>
+                <button class="btn" type="submit">保存联系人</button>
+              </form>
+            </details>
+            <section id="msg-import" hidden>
+              <label for="msg-contact">会话</label><select id="msg-contact"></select>
+              <details class="ops-details"><summary>已导入消息</summary><div id="msg-history"></div></details>
+              <form id="msg-import-form" class="mind-signal">
+                <label for="msg-content">导入对方原文</label>
+                <textarea id="msg-content" required maxlength="12000" rows="3"></textarea>
+                <button class="btn" type="submit">导入消息</button>
+              </form>
+              <form id="msg-reply-form" class="mind-signal">
+                <label for="msg-instruction">如何回复或翻译？</label>
+                <textarea id="msg-instruction" required maxlength="4000" rows="2">根据会话准备简洁回复，保留未知项，不自行承诺。</textarea>
+                <button class="btn" type="submit">准备本地回复</button>
+              </form>
+            </section>
+            <p id="msg-notice" role="status" aria-live="polite"></p>
+            <p id="msg-empty" class="ops-scope">还没有待审阅的回复。</p>
+            <div id="msg-outbox"></div>
+            <div id="msg-promises"></div>
+          </details>
+          <details class="ops-details"><summary>工作记录与结果</summary>
+          <div class="ops-section-head"><h3>最近的工作</h3><button id="rt-refresh" class="btn" type="button">刷新</button></div>
+          <div id="rt-jobs"></div>
+          </details>
+        </section>
+        <details class="ops-details"><summary>账号档案与长期记忆</summary>
+        <div class="ops-account-bar">
+          <label for="ops-account">账号档案</label><select id="ops-account"><option value="">请先创建档案</option></select>
+          <button id="ops-new-toggle" class="btn" type="button" aria-expanded="false">＋ 新建档案</button>
+          <span id="ops-version">各档案独立保存</span>
+        </div>
+        <form id="ops-new-form" class="ops-inline-form" hidden>
+          <label for="ops-name">档案名称</label><input id="ops-name" maxlength="80" required placeholder="给这个账号起个名字">
+          <button class="btn primary" type="submit">创建</button>
+        </form>
+        <p id="ops-message" role="status" aria-live="polite"></p>
+        <div id="ops-empty" class="ops-empty">
+          <span>◎</span><h3>从一个账号档案开始</h3>
+          <p>赛道、人设和经历由你定义。先填最重要的部分，缺少的资料会在计划里提醒你。</p>
+          <button id="ops-empty-create" type="button" class="btn primary">建立我的档案 ↗</button>
+        </div>
+        <div id="ops-workspace" hidden>
+          <p class="ops-scope">这是本机运营档案，平台身份需在发布前另行核对。这里生成的计划不会自动发布或回复。</p>
+          <div class="ops-tabs" role="tablist" aria-label="运营模块">
+            <button id="ops-tab-profile" type="button" role="tab" aria-selected="true" aria-controls="ops-pane-profile" data-ops-tab="profile">01 · 我是谁</button>
+            <button id="ops-tab-memory" type="button" role="tab" aria-selected="false" aria-controls="ops-pane-memory" data-ops-tab="memory" tabindex="-1">02 · 我记得</button>
+            <button id="ops-tab-plan" type="button" role="tab" aria-selected="false" aria-controls="ops-pane-plan" data-ops-tab="plan" tabindex="-1">03 · 接下来</button>
+          </div>
+          <section id="ops-pane-profile" role="tabpanel" aria-labelledby="ops-tab-profile">
+            <div class="ops-section-head"><div><h3>账号的底色</h3><p>锁定项保护 AI 更新；你始终可以修改。当前版本的 AI 只生成计划建议。</p></div>
+              <button id="ops-reload" class="btn" type="button">读取最新档案（替换表单）</button></div>
+            <form id="ops-profile-form">
+              <div id="ops-fields" class="ops-fields"></div>
+              <div class="ops-form-foot"><span id="ops-dirty">所有修改已保存</span><button id="ops-save" type="submit" class="btn primary">保存人设</button></div>
+            </form>
+            <details class="ops-details"><summary>查看版本记录</summary><div id="ops-history"></div></details>
+          </section>
+          <section id="ops-pane-memory" role="tabpanel" aria-labelledby="ops-tab-memory" hidden>
+            <div class="ops-memory-layout">
+              <form id="ops-memory-form" class="ops-memory-compose">
+                <h3>留下一条有出处的记忆</h3>
+                <label for="ops-kind">类型</label><select id="ops-kind"><option value="experience">真实经历 · 我确实做过</option><option value="observation">观察记录 · 数据与反馈</option><option value="hypothesis">待验证假设 · 还需证据</option></select>
+                <label for="ops-memory-content">内容</label><textarea id="ops-memory-content" rows="5" maxlength="4000" required placeholder="发生了什么？保留具体细节，也标出不确定的部分。"></textarea>
+                <label for="ops-source">来源说明</label><input id="ops-source" maxlength="1000" required placeholder="本人记录、原始链接或素材文件说明">
+                <label for="ops-occurred">发生时间</label><input id="ops-occurred" maxlength="100" required placeholder="例如 2026-10-29 下午；不确定可写明">
+                <label for="ops-expiry">有效至（可选）</label><input id="ops-expiry" type="datetime-local">
+                <p>经历不会自动过期；价格、活动等动态信息可以设置有效期。来源说明会一起交给模型。</p>
+                <button type="submit" class="btn primary">存入记忆</button>
+              </form>
+              <div class="ops-memory-library"><form id="ops-search-form" class="ops-search">
+                <label class="sr-only" for="ops-search">搜索记忆</label><input id="ops-search" maxlength="200" placeholder="搜索内容或来源">
+                <button type="submit" class="btn">查找</button></form>
+                <label class="ops-check"><input id="ops-show-inactive" type="checkbox">显示已撤回与过期记录</label>
+                <div id="ops-memories"></div>
+              </div>
+            </div>
+          </section>
+          <section id="ops-pane-plan" role="tabpanel" aria-labelledby="ops-tab-plan" hidden>
+            <form id="ops-plan-form">
+              <label for="ops-objective">这一轮，想推进什么？</label>
+              <textarea id="ops-objective" rows="3" maxlength="2000" required placeholder="例如：根据我已有的素材安排下一篇，并说明还缺哪些信息。"></textarea>
+              <div class="ops-plan-controls"><label for="ops-memory-query">相关记忆关键词（可选）<input id="ops-memory-query" maxlength="200" placeholder="留空则读取最近30条有效记忆"></label>
+                <button id="ops-generate" type="submit" class="btn primary">并行生成运营计划 ↗</button></div>
+              <p class="ops-scope">内容策划 ＋ 运营分析 → 独立核对。分析依据为你录入的资料，尚未接入平台指标采集。</p>
+            </form>
+            <div class="ops-section-head"><h3>计划与进展</h3><button id="ops-refresh-plans" type="button" class="btn">刷新记录</button></div>
+            <div id="ops-plans"></div>
+          </section>
+        </div>
+        </details>
+      </section>
 
       <section class="studio-scene" data-studio-panel="scene" aria-label="可交互的 Agent 工作场景">
         <div class="scene-floor" id="scene-floor" data-phase="idle" data-status="idle">
@@ -290,11 +512,11 @@
         <article class="rhythm-card">
           <span class="card-kicker">CREATE MORE / PUBLISH SLOWLY</span><h3>给发布留一点呼吸。</h3>
           <p id="rhythm-status" role="status">正在读取测试节奏…</p>
-          <div class="quota-head"><strong>滚动 24 小时提交额度</strong><span id="quota-count">—</span></div>
+          <div class="quota-head"><strong>发布节奏与近期记录</strong><span id="quota-count">—</span></div>
           <div class="quota-dots" id="quota-dots"></div>
-          <div class="rhythm-stats"><div><span>发布剩余</span><strong id="publish-quota">—</strong></div><div><span>下次可发布</span><strong id="rhythm-next">—</strong></div><div><span>提交最小间隔</span><strong id="rhythm-interval">—</strong></div></div>
+          <div class="rhythm-stats"><div><span>每日发布次数</span><strong id="publish-quota">—</strong></div><div><span>下次可发布</span><strong id="rhythm-next">—</strong></div><div><span>两次发帖间隔</span><strong id="rhythm-interval">—</strong></div></div>
           <div class="rhythm-account"><span>测试账号</span><strong id="rhythm-account">等待核对</strong><p id="rhythm-account-detail"></p></div>
-          <small id="rhythm-policy">项目内部测试上限，不是平台公布的安全阈值。</small>
+          <small id="rhythm-policy">不设每日次数上限；两次发帖间隔约10分钟。</small>
           <button id="rhythm-refresh" type="button">刷新节奏</button>
         </article>
         <aside class="queue-card"><div><span class="card-kicker">WAITING IN THE WINGS</span><h3>候场作品 <b id="studio-queue-count">0</b></h3></div><p id="queue-status">正在读取队列…</p><div id="studio-queue"></div></aside>
@@ -368,5 +590,11 @@
   <script src="execution-feed.js?v=2"></script>
   <script src="app.js?v=execution-2"></script>
   <script src="studio.js?v=playful-1"></script>
+  <script src="operations.js"></script>
+  <script src="runtime.js"></script>
+  <script src="mind.js"></script>
+  <script src="messages.js"></script>
+  <script src="content.js"></script>
+  <script src="journal.js"></script>
 </body>
 </html>

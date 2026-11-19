@@ -7,6 +7,9 @@ tags: [capability, publish, xiaohongshu]
 
 工具：`xhs_publish_note`、`xhs_publish_video`、`xhs_publish_longform`、
 `xhs_publish_podcast`、`xhs_prepare_note`、`xhs_content_queue`。
+三域母稿任务使用专用 `xhs_publish_content(content_id)`，只能提交此任务绑定且已经独立核对的
+图文母稿。先读取本Skill，再初始化任务目录，再调用一次；文案、素材和账号从冻结记录取得，
+不在执行时重新生成。只支持self；额度延后、结果未知或版本变化立即结束，禁止换发布工具重试。
 图文与视频统一经过内容回读检查，旧图文分支已移除。
 `visibility` 默认 `self`，明确参数可选 `public/friends`；原任务提交指纹继续防重复。
 
@@ -98,8 +101,8 @@ macOS 可通过 `web_desktop` 使用真实无障碍控件执行预填和“暂�
 
 当前新账号测试模式优先于历史调度说明。后台默认暂停，手动run_due也先检查owner_id、
 expected_account和共享额度，拒绝时不领取、attempts=0；队列publication须显式绑定稳定owner_id。
-发布、修改、删除、互动、消息、合集、RSS和保存草稿共用30分钟最小间隔，
-单账号滚动24小时4次，其中publish最多1次。保存草稿不是零副作用的预填。
+两次发帖间隔10分钟，不设每日或滚动24小时次数上限；
+修改、删除、互动、消息、合集、RSS和保存草稿不占发帖间隔。保存草稿不是零副作用的预填。
 原提交记录已存在时只返回记录；预算领取在新journal之前，失败/不确定不退还。
 不要立即发布再删除，也不要通过其他任务/账号/transport绕过间隔。
 目前旧本地草稿没有稳定账号归属，测试模式保留原草稿，不执行draft publish/delete。

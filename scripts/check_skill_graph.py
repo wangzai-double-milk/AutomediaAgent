@@ -68,7 +68,7 @@ def validate(registry_path=SKILLS_ROOT / "registry.json"):
     if duplicates:
         errors.append(f"duplicate tool schemas: {duplicates}")
 
-    source = ast.parse((ROOT / "ga.py").read_text(encoding="utf-8"))
+    source = ast.parse((ROOT / "automedia/legacy/ga.py").read_text(encoding="utf-8"))
     handlers = {
         node.name[3:]
         for cls in source.body if isinstance(cls, ast.ClassDef)

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">AutoMedia Agent — A voice for your virtual IP</title>
+  <desc id="desc">Define a persistent virtual character for research, content creation, review and communication workflows.</desc>
+  <defs>
+    <linearGradient id="paper" x2="1" y2="1"><stop stop-color="#faf7f0"/><stop offset="1" stop-color="#efe9dc"/></linearGradient>
+    <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse"><path d="M26 0H0V26" fill="none" stroke="#d8cebb" stroke-opacity=".3"/></pattern>
+  </defs>
+  <rect width="1200" height="340" rx="24" fill="url(#paper)"/>
+  <rect x="655" width="545" height="340" fill="url(#grid)"/>
+  <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+    <rect x="42" y="37" width="46" height="46" rx="13" fill="#903f43"/>
+    <text x="65" y="67" text-anchor="middle" fill="#fff8ee" font-size="20" font-weight="700">AM</text>
+    <text x="104" y="67" fill="#694940" font-size="15" font-weight="600" letter-spacing="3">LOCAL · OPEN SOURCE · SKILLS</text>
+    <text x="42" y="147" fill="#282e29" font-size="55" font-weight="750" letter-spacing="-2">AutoMedia Agent</text>
+    <text x="44" y="195" fill="#694940" font-size="25">Give your virtual IP a voice.</text>
+    <text x="44" y="231" fill="#687066" font-size="18">Research. Create. Review. Communicate.</text>
+    <rect x="44" y="264" width="169" height="32" rx="16" fill="#e2e8da"/>
+    <text x="128" y="285" text-anchor="middle" fill="#53644a" font-size="13">Your role. Your rules.</text>
+    <g stroke="#908e7d" stroke-width="2" fill="none">
+      <path d="M833 110H934M1010 160V193M934 244H833"/>
+      <path d="m928 105 6 5-6 5M1005 187l5 6 5-6M839 239l-6 5 6 5"/>
+    </g>
+    <g>
+      <rect x="683" y="62" width="150" height="97" rx="16" fill="#fffdf6" stroke="#d7d1c0"/>
+      <rect x="934" y="62" width="150" height="97" rx="16" fill="#fffdf6" stroke="#d7d1c0"/>
+      <rect x="934" y="193" width="150" height="97" rx="16" fill="#903f43"/>
+      <rect x="683" y="193" width="150" height="97" rx="16" fill="#e2e8da" stroke="#c7d0bb"/>
+      <text x="705" y="93" fill="#8d977d" font-size="12" letter-spacing="2">01 / OBSERVE</text>
+      <text x="705" y="131" fill="#30392f" font-size="23" font-weight="650">Research</text>
+      <text x="956" y="93" fill="#8d977d" font-size="12" letter-spacing="2">02 / EXPRESS</text>
+      <text x="956" y="131" fill="#30392f" font-size="23" font-weight="650">Create</text>
+      <text x="956" y="224" fill="#e3bcb2" font-size="12" letter-spacing="2">03 / THINK</text>
+      <text x="956" y="263" fill="#fff9ef" font-size="23" font-weight="650">Review</text>
+      <text x="705" y="224" fill="#697d5c" font-size="12" letter-spacing="2">04 / VERIFY</text>
+      <text x="705" y="263" fill="#30392f" font-size="23" font-weight="650">Execute</text>
+    </g>
+  </g>
+</svg>
